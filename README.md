@@ -77,10 +77,10 @@ const off = engine.onCollision((a, b) => {
 engine.start();
 ```
 
-A page can load the same constructors from the script build. `EmojiEngine` is the global:
+A page can load the same constructors from the script build. `EmojiEngine` is the global. `dist/emoji-engine-2d.min.js` is the same script, minified.
 
 ```html
-<script src="./dist/emoji-engine-2d.js"></script>
+<script src="./dist/emoji-engine-2d.min.js"></script>
 <script>
   const { Engine, Terminal, Utilities } = EmojiEngine;
 </script>

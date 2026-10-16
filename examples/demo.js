@@ -10,7 +10,8 @@ import { Engine, Terminal, Utilities } from '../dist/index.js';
 const cellWidth = 12;
 const cellHeight = 18;
 
-checkBundle();
+checkBundle('emoji-engine-2d.js');
+checkBundle('emoji-engine-2d.min.js');
 installHostShims();
 
 const engine = new Engine({ width: 480, height: 270 });
@@ -70,22 +71,22 @@ if (typeof off !== 'function') fail('onCollision must return an unsubscribe func
 
 engine.start();
 
-function checkBundle() {
-  const code = readFileSync(new URL('../dist/emoji-engine-2d.js', import.meta.url), 'utf8');
+function checkBundle(file) {
+  const code = readFileSync(new URL(`../dist/${file}`, import.meta.url), 'utf8');
   const sandbox = {};
   vm.createContext(sandbox);
   try {
-    vm.runInContext(code, sandbox, { filename: 'emoji-engine-2d.js' });
+    vm.runInContext(code, sandbox, { filename: file });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    fail(`script build did not run: ${message}`);
+    fail(`${file} did not run: ${message}`);
   }
   const api = sandbox.EmojiEngine;
   const names = api ? Object.keys(api).join(',') : 'missing';
-  if (typeof api?.Canvas !== 'function') fail(`script build missing Canvas (${names})`);
-  if (typeof api?.Terminal !== 'function') fail(`script build missing Terminal (${names})`);
-  if (typeof api?.Engine !== 'function') fail(`script build missing Engine (${names})`);
-  if (typeof api?.Utilities?.wrap !== 'function') fail(`script build missing Utilities.wrap (${names})`);
+  if (typeof api?.Canvas !== 'function') fail(`${file} missing Canvas (${names})`);
+  if (typeof api?.Terminal !== 'function') fail(`${file} missing Terminal (${names})`);
+  if (typeof api?.Engine !== 'function') fail(`${file} missing Engine (${names})`);
+  if (typeof api?.Utilities?.wrap !== 'function') fail(`${file} missing Utilities.wrap (${names})`);
 }
 
 function checkChrome() {

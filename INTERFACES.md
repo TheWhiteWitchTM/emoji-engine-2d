@@ -301,4 +301,4 @@ const off = engine.onCollision((a, b) => {
 engine.start();
 ```
 
-`examples/demo.js` is this scene with positions that meet, plus checks for the wrap, the terminal buffer, the layers, the camera, and collision. It imports `../dist/index.js`. `npm run demo` builds, then runs it with Node. The script-tag build is `dist/emoji-engine-2d.js`, which assigns `globalThis.EmojiEngine`.
+`examples/demo.js` is this scene with positions that meet, plus checks for the wrap, the terminal buffer, the layers, the camera, and collision. It imports `../dist/index.js`. `npm run demo` builds, then runs it with Node. The script-tag builds are `dist/emoji-engine-2d.js` and the minified `dist/emoji-engine-2d.min.js`. Both assign `globalThis.EmojiEngine`.
