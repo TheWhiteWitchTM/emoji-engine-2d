@@ -72,7 +72,7 @@ if (typeof off !== 'function') fail('onCollision must return an unsubscribe func
 engine.start();
 
 function checkBundle(file) {
-  const code = readFileSync(new URL(`../dist/${file}`, import.meta.url), 'utf8');
+  const code = readFileSync(new URL(`../browser/${file}`, import.meta.url), 'utf8');
   const sandbox = {};
   vm.createContext(sandbox);
   try {

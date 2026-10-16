@@ -75,14 +75,15 @@ src/terminal.ts     Terminal, Cell
 src/engine.ts       Engine, Sprite
 src/utilities.ts    Utilities, wrap result
 src/index.ts        public re-exports
-dist/               plain JavaScript, declarations, the script bundle, and its minified build
+dist/               plain JavaScript modules and declarations
+browser/            script-tag bundle and its minified build
 examples/demo.js    runnable scene
 examples/play.html  the same scene in a browser
 examples/dom-shim.js
 ```
 
-`package.json` is `"type": "module"`. `tsconfig.json` targets ES2022 and includes the DOM library. `npm run build` compiles `src/` to JavaScript and declarations in `dist/`, then bundles `dist/emoji-engine-2d.js` for a script tag and writes the minified `dist/emoji-engine-2d.min.js`. `npm install` runs that build. `npm run demo` runs `examples/demo.js` with Node against `dist/`. Using the engine does not require a TypeScript loader.
+`package.json` is `"type": "module"`. `tsconfig.json` targets ES2022 and includes the DOM library. `npm run build` compiles `src/` to JavaScript and declarations in `dist/`, then bundles `browser/emoji-engine-2d.js` for a script tag and writes the minified `browser/emoji-engine-2d.min.js`. `npm install` runs that build. `npm run demo` runs `examples/demo.js` with Node against `dist/`. Using the engine does not require a TypeScript loader.
 
-Import `emoji-engine-2d` or `./dist/index.js` from an ES module. A classic page loads `dist/emoji-engine-2d.js` or `dist/emoji-engine-2d.min.js` and reads `EmojiEngine.Canvas`, `EmojiEngine.Terminal`, `EmojiEngine.Engine`, and `EmojiEngine.Utilities`.
+Import `emoji-engine-2d` or `./dist/index.js` from an ES module. A classic page loads `browser/emoji-engine-2d.js` or `browser/emoji-engine-2d.min.js` and reads `EmojiEngine.Canvas`, `EmojiEngine.Terminal`, `EmojiEngine.Engine`, and `EmojiEngine.Utilities`.
 
 The shim exists so that one command can construct a canvas under Node. It is outside the engine. Canvas and Utilities require `document`. Engine and Terminal listen on `window` only when it exists. `beep` returns when audio is missing. `start` requires `requestAnimationFrame`.

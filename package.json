@@ -13,6 +13,7 @@
   },
   "files": [
     "dist",
+    "browser",
     "src",
     "examples",
     "ARCHITECTURE.md",

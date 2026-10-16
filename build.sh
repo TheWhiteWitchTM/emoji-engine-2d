@@ -2,4 +2,4 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 node build.js
-echo "Build complete → dist/"
+echo "Build complete → dist/ and browser/"

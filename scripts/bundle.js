@@ -1,5 +1,5 @@
 import esbuild from 'esbuild';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
@@ -20,10 +20,10 @@ await esbuild.build({
   entryPoints: ['dist/index.js'],
   globalName: 'EmojiEngine',
   footer: { js: 'globalThis.EmojiEngine = EmojiEngine;' },
-  outfile: 'dist/emoji-engine-2d.js',
+  outfile: 'browser/emoji-engine-2d.js',
 });
 
-const minFile = 'dist/emoji-engine-2d.min.js';
+const minFile = 'browser/emoji-engine-2d.min.js';
 
 await esbuild.build({
   ...shared,
@@ -40,6 +40,10 @@ globalThis.EmojiEngine = { Canvas, Terminal, Engine, Utilities };
   treeShaking: true,
   outfile: minFile,
 });
+
+for (const stale of ['dist/emoji-engine-2d.js', 'dist/emoji-engine-2d.min.js']) {
+  rmSync(path.join(root, stale), { force: true });
+}
 
 const bytes = readFileSync(path.join(root, minFile));
 const gzip = gzipSync(bytes).length;

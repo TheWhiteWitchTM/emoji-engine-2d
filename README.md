@@ -18,7 +18,7 @@ Designed for the kind of games that lived between the late 1970s and the early 2
 - Terminal cell buffer (cursor, 16-color cells, batched redraw) that paints through a Canvas, ignores the camera, and exposes that canvas
 - Optional Utilities chrome: title, middle slot, fullscreen button, plain footer div
 - `isKeyDown`, `onKey`, and a short `beep`
-- Plain JavaScript in `dist/` for an `import` or a script tag
+- Plain JavaScript in `dist/` for an `import`, and script-tag builds in `browser/`
 
 The surface is intentionally small. Tilemaps, animation, and scenes can grow on top of these four pieces.
 
@@ -29,7 +29,7 @@ npm install
 npm run demo
 ```
 
-`npm install` compiles `src/` into `dist/`. `npm run build` does that again after you change the TypeScript. The demo imports the built files with Node, so it does not need tsx. It wraps a canvas, writes two lines through a Terminal, places a witch and a moving hunter on different layers, and exits when the collision callback fires:
+`npm install` compiles `src/` into `dist/` and writes the script-tag builds to `browser/`. `npm run build` does that again after you change the TypeScript. The demo imports the built files with Node, so it does not need tsx. It wraps a canvas, writes two lines through a Terminal, places a witch and a moving hunter on different layers, and exits when the collision callback fires:
 
 ```text
 Witch Hunt
@@ -46,7 +46,7 @@ The same scene is in `examples/play.html`. From the repository root:
 python3 -m http.server 8765
 ```
 
-Open `http://localhost:8765/examples/play.html`. It loads `dist/emoji-engine-2d.js`, so run `npm run build` first. Arrow keys steer the witch. The footer reads `browser ok` when the page's own checks pass.
+Open `http://localhost:8765/examples/play.html`. It loads `browser/emoji-engine-2d.js`, so run `npm run build` first. Arrow keys steer the witch. The footer reads `browser ok` when the page's own checks pass.
 
 ## Use the API
 
@@ -77,10 +77,10 @@ const off = engine.onCollision((a, b) => {
 engine.start();
 ```
 
-A page can load the same constructors from the script build. `EmojiEngine` is the global. `dist/emoji-engine-2d.min.js` is the same script, minified.
+A page can load the same constructors from the script build. `EmojiEngine` is the global. `browser/emoji-engine-2d.min.js` is the same script, minified.
 
 ```html
-<script src="./dist/emoji-engine-2d.min.js"></script>
+<script src="./browser/emoji-engine-2d.min.js"></script>
 <script>
   const { Engine, Terminal, Utilities } = EmojiEngine;
 </script>
