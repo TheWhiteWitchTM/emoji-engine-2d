@@ -1,4 +1,4 @@
-import { Canvas, paintEmoji, type Drawable, type Point } from './canvas.ts';
+import { Canvas, paintEmoji, type Drawable, type Point } from './canvas.js';
 
 /**
  * A free-moving emoji sprite. `radius` is always `size / 2` and is what
@@ -18,8 +18,12 @@ export interface Sprite extends Drawable {
   data: Record<string, unknown>;
 }
 
-/** Called once per overlapping pair per update, earlier sprite first. */
+/** Called once per overlapping pair per update. `a` was created before `b`. */
 export type CollisionHandler = (a: Sprite, b: Sprite) => void;
+
+interface CollisionRegistration {
+  handler: CollisionHandler;
+}
 
 /** Options for the game systems layer. */
 export interface EngineOptions {
@@ -35,7 +39,7 @@ interface EngineContract {
   readonly canvas: Canvas;
   sprite(emoji: string, x: number, y: number, size?: number, layer?: string): Sprite;
   motion(sprite: Sprite, vx: number, vy: number): void;
-  onCollision(handler: CollisionHandler): void;
+  onCollision(handler: CollisionHandler): () => void;
   update(): void;
   start(): void;
   stop(): void;
@@ -51,11 +55,12 @@ export class Engine implements EngineContract {
   readonly canvas: Canvas;
 
   private readonly sprites: Sprite[] = [];
-  private readonly collisions: CollisionHandler[] = [];
+  private readonly collisions: CollisionRegistration[] = [];
   private readonly keys = new Set<string>();
   private audio: AudioContext | null = null;
   private raf = 0;
   private running = false;
+  private inUpdate = false;
 
   /** Use `options.canvas`, or create one. Does not build page chrome. */
   constructor(options: EngineOptions = {}) {
@@ -84,27 +89,61 @@ export class Engine implements EngineContract {
     sprite.vy = vy;
   }
 
-  /** Register a callback for living sprites whose circles overlap. */
-  onCollision(handler: CollisionHandler): void {
-    this.collisions.push(handler);
+  /**
+   * Register a callback for living sprites whose circles overlap.
+   * The returned function removes this registration. Calling it again does nothing.
+   * Two registrations of one function are removed separately.
+   */
+  onCollision(handler: CollisionHandler): () => void {
+    const entry = { handler };
+    this.collisions.push(entry);
+    return () => {
+      const index = this.collisions.indexOf(entry);
+      if (index >= 0) this.collisions.splice(index, 1);
+    };
   }
 
-  /** Move living sprites by `vx`/`vy`, then test circle overlaps. */
+  /**
+   * Move living sprites by `vx`/`vy`, then report circle overlaps.
+   * Pairs are chosen after the move and do not change while handlers run.
+   * Throws when called from a collision handler.
+   */
   update(): void {
-    const live: Sprite[] = [];
-    for (const sprite of this.sprites) {
-      if (!sprite.alive) continue;
-      sprite.x += sprite.vx;
-      sprite.y += sprite.vy;
-      live.push(sprite);
+    if (this.inUpdate) {
+      throw new Error('Engine.update cannot be called from a collision handler');
     }
-    for (let i = 0; i < live.length; i += 1) {
-      for (let j = i + 1; j < live.length; j += 1) {
-        const a = live[i];
-        const b = live[j];
-        if (!circlesOverlap(a, b)) continue;
-        for (const handler of this.collisions) handler(a, b);
+    this.inUpdate = true;
+    try {
+      const live: Sprite[] = [];
+      for (const sprite of this.sprites) {
+        if (!sprite.alive) continue;
+        sprite.x += sprite.vx;
+        sprite.y += sprite.vy;
+        live.push(sprite);
       }
+
+      const pairs: Array<[Sprite, Sprite]> = [];
+      for (let i = 0; i < live.length; i += 1) {
+        for (let j = i + 1; j < live.length; j += 1) {
+          const a = live[i];
+          const b = live[j];
+          if (a === b || !circlesOverlap(a, b)) continue;
+          pairs.push([a, b]);
+        }
+      }
+
+      // Copy first so a handler can unsubscribe without skipping the next
+      // registration. A handler removed before its turn does not run. A
+      // handler added during this update waits until the next update.
+      const handlers = this.collisions.slice();
+      for (const [a, b] of pairs) {
+        for (const entry of handlers) {
+          if (this.collisions.indexOf(entry) < 0) continue;
+          entry.handler(a, b);
+        }
+      }
+    } finally {
+      this.inUpdate = false;
     }
   }
 
@@ -158,8 +197,13 @@ export class Engine implements EngineContract {
 
   private tick = (): void => {
     if (!this.running) return;
-    this.update();
-    this.canvas.draw();
+    try {
+      this.update();
+      this.canvas.draw();
+    } catch (error) {
+      this.running = false;
+      throw error;
+    }
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.tick);
   };
@@ -208,5 +252,6 @@ function circlesOverlap(a: Sprite, b: Sprite): boolean {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   const reach = a.radius + b.radius;
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || !Number.isFinite(reach)) return false;
   return dx * dx + dy * dy <= reach * reach;
 }

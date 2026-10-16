@@ -44,9 +44,11 @@ After a mutation the terminal asks its canvas to `draw`, which repaints every la
 
 `sprite(emoji, x, y, size, layer)` builds a sprite, stores it, and adds it to that canvas layer. Any layer name is valid. The default layer is `default`. `size` is the font size in pixels and defaults to 32. `motion` writes `vx` and `vy` in pixels per frame.
 
-`update` moves every living sprite by its velocity, then tests pairs. Two living sprites collide when the distance between centers is within `radius + radius`. `radius` is always `size / 2`. Each overlapping pair is reported once per update, earlier sprite first, to every `onCollision` callback. The report repeats on later frames while the circles still overlap. A sprite with `alive === false` does not move, collide, or paint. It stays in the list so the game can revive it.
+`update` moves every living sprite by its velocity, then tests pairs. Two living sprites collide when the distance between centers is within `radius + radius`. `radius` is always `size / 2`. The layer is ignored. Positions and the sum of the radii must be finite; otherwise that pair is not a hit. The test uses the positions after the move, so a sprite that jumps completely past another in one update is not a hit.
 
-`start` schedules `requestAnimationFrame`. Each frame calls `update` and then `canvas.draw`. `stop` cancels the next frame. `start` does nothing if the loop is already running.
+Each overlapping pair is collected once, with the sprite created earlier as `a`. Handlers then run for that fixed list. Moving or killing a sprite inside a handler does not add or drop pairs until the next update. The same pair is reported again on the next update while the circles still overlap. `onCollision` returns a function that removes that registration. A handler removed before its turn does not run. A handler added during the update waits until the next update. Calling the returned function again does nothing. Two registrations of one function are removed separately. `update` throws if a handler calls it. A sprite with `alive === false` does not move, collide, or paint. It stays in the list so the game can revive it.
+
+`start` schedules `requestAnimationFrame`. Each frame calls `update` and then `canvas.draw`. `stop` cancels the next frame. `start` does nothing if the loop is already running. If `update` or `canvas.draw` throws, the loop stops, and a later `start` runs again.
 
 `isKeyDown` tracks `KeyboardEvent.key` on `window` when that exists. `beep(freq, duration)` plays a short square wave through the Web Audio API. With no `AudioContext`, or if playback is rejected, it returns without throwing.
 
@@ -73,10 +75,14 @@ src/terminal.ts     Terminal, Cell
 src/engine.ts       Engine, Sprite
 src/utilities.ts    Utilities, wrap result
 src/index.ts        public re-exports
-examples/demo.ts    runnable scene
-examples/dom-shim.ts
+dist/               plain JavaScript, declarations, and the script bundle
+examples/demo.js    runnable scene
+examples/play.html  the same scene in a browser
+examples/dom-shim.js
 ```
 
-`package.json` is `"type": "module"`. `tsconfig.json` targets ES2022 and includes the DOM library. Nothing is precompiled. `npm run demo` runs `examples/demo.ts` with tsx.
+`package.json` is `"type": "module"`. `tsconfig.json` targets ES2022 and includes the DOM library. `npm run build` compiles `src/` to JavaScript and declarations in `dist/`, then bundles `dist/emoji-engine-2d.js` for a script tag. `npm install` runs that build. `npm run demo` runs `examples/demo.js` with Node against `dist/`. Using the engine does not require a TypeScript loader.
+
+Import `emoji-engine-2d` or `./dist/index.js` from an ES module. A classic page loads `dist/emoji-engine-2d.js` and reads `EmojiEngine.Canvas`, `EmojiEngine.Terminal`, `EmojiEngine.Engine`, and `EmojiEngine.Utilities`.
 
 The shim exists so that one command can construct a canvas under Node. It is outside the engine. Canvas and Utilities require `document`. Engine and Terminal listen on `window` only when it exists. `beep` returns when audio is missing. `start` requires `requestAnimationFrame`.

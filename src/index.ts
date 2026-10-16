@@ -1,11 +1,11 @@
-export { Canvas } from './canvas.ts';
-export type { CanvasOptions, Drawable, Point } from './canvas.ts';
+export { Canvas } from './canvas.js';
+export type { CanvasOptions, Drawable, Point } from './canvas.js';
 
-export { Terminal } from './terminal.ts';
-export type { Cell, KeyHandler, TerminalOptions } from './terminal.ts';
+export { Terminal } from './terminal.js';
+export type { Cell, KeyHandler, TerminalOptions } from './terminal.js';
 
-export { Engine } from './engine.ts';
-export type { CollisionHandler, EngineOptions, Sprite } from './engine.ts';
+export { Engine } from './engine.js';
+export type { CollisionHandler, EngineOptions, Sprite } from './engine.js';
 
-export { Utilities } from './utilities.ts';
-export type { WrapOptions, WrapResult, WrapTarget } from './utilities.ts';
+export { Utilities } from './utilities.js';
+export type { WrapOptions, WrapResult, WrapTarget } from './utilities.js';

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Witch Hunt</title>
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #111; }
+    body { display: flex; justify-content: center; padding: 24px; }
+  </style>
+</head>
+<body>
+  <script src="../dist/emoji-engine-2d.js"></script>
+  <script>
+    const cellWidth = 12;
+    const cellHeight = 18;
+    const { Engine, Terminal, Utilities } = EmojiEngine;
+
+    const engine = new Engine({ width: 480, height: 270 });
+    const ui = Utilities.wrap(engine.canvas, { title: 'Witch Hunt' });
+    document.body.appendChild(ui.wrap);
+    ui.headerMiddle.textContent = 'demo';
+
+    const term = new Terminal({
+      cols: 36,
+      rows: 6,
+      canvas: engine.canvas,
+      cellWidth,
+      cellHeight,
+      layer: 'terminal',
+    });
+    term.write('Witch Hunt\n');
+    term.write('A hunter crosses the heath.');
+
+    const witch = engine.sprite('🧙‍♀️', 360, 180, 48);
+    const hunter = engine.sprite('✝️', 48, 180, 36, 'entities');
+    engine.motion(hunter, 4, 0);
+
+    const problems = [];
+    const expect = (ok, message) => { if (!ok) problems.push(message); };
+
+    checkChrome();
+    checkTerminal();
+    checkCamera();
+    checkCollision();
+    checkKeys();
+    checkPaint();
+
+    const report = problems.length === 0 ? 'browser ok' : problems.join('; ');
+    document.body.dataset.ee = report;
+    ui.footer.textContent = problems.length === 0 ? 'browser ok · arrow keys steer' : report;
+    if (problems.length) ui.footer.style.color = '#ffb4b4';
+
+    let playing = problems.length === 0;
+    if (playing) {
+      const off = engine.onCollision((a, b) => {
+        off();
+        playing = false;
+        engine.motion(hunter, 0, 0);
+        engine.motion(witch, 0, 0);
+        term.write('\nThey meet.');
+        ui.footer.textContent = `browser ok · ${a.emoji} hit ${b.emoji}`;
+        engine.beep(523, 80);
+      });
+      engine.start();
+      requestAnimationFrame(steer);
+    } else {
+      engine.canvas.draw();
+    }
+
+    function steer() {
+      if (!playing) return;
+      const x = (engine.isKeyDown('ArrowRight') ? 1 : 0) - (engine.isKeyDown('ArrowLeft') ? 1 : 0);
+      const y = (engine.isKeyDown('ArrowDown') ? 1 : 0) - (engine.isKeyDown('ArrowUp') ? 1 : 0);
+      engine.motion(witch, x * 3, y * 3);
+      requestAnimationFrame(steer);
+    }
+
+    function checkChrome() {
+      const middle = ui.headerMiddle;
+      const header = middle && middle.parentElement;
+      expect(Boolean(middle && header && ui.footer), 'chrome missing');
+      if (!header || !ui.footer) return;
+      const parts = Array.from(header.children);
+      expect(parts.length === 3, 'header parts');
+      expect(parts[0].textContent === 'Witch Hunt', 'title');
+      expect(parts[1] === middle, 'middle slot');
+      expect(parts[2].tagName === 'BUTTON', 'fullscreen button');
+      expect(ui.footer.tagName === 'DIV', 'footer');
+      expect(engine.canvas.element.parentElement === ui.wrap, 'canvas wrapped');
+      const order = Array.from(ui.wrap.children).map((node) => node.tagName).join(',');
+      expect(order === 'HEADER,CANVAS,DIV', 'wrap order ' + order);
+      ui.setTitle('Night Hunt');
+      expect(parts[0].textContent === 'Night Hunt', 'setTitle');
+      ui.setTitle('Witch Hunt');
+      parts[2].click();
+    }
+
+    function checkTerminal() {
+      expect(rowText(0) === 'Witch Hunt', 'row 0');
+      expect(rowText(1) === 'A hunter crosses the heath.', 'row 1');
+      expect(term.canvas === engine.canvas, 'shared canvas');
+    }
+
+    function checkCamera() {
+      const ctx = engine.canvas.ctx;
+      const seen = [];
+      const orig = ctx.fillText;
+      ctx.fillText = function (text, x, y) {
+        seen.push({ text, x, y });
+        return orig.apply(this, arguments);
+      };
+      engine.canvas.setCamera(100, 50);
+      engine.canvas.draw();
+      ctx.fillText = orig;
+      const mark = seen.find((item) => item.text === 'W');
+      const glyph = seen.find((item) => item.text === witch.emoji);
+      expect(Boolean(mark) && mark.x === cellWidth / 2 && mark.y === cellHeight / 2, 'terminal followed the camera');
+      expect(Boolean(glyph) && glyph.x === witch.x - 100 && glyph.y === witch.y - 50, 'sprite missed the camera');
+      engine.canvas.setCamera(0, 0);
+      engine.canvas.draw();
+    }
+
+    function checkCollision() {
+      const box = new Engine({ width: 64, height: 64 });
+      const first = box.sprite('A', 0, 0, 20);
+      const second = box.sprite('B', 20, 0, 20);
+      let hits = 0;
+      let order = '';
+      const off = box.onCollision((a, b) => {
+        hits += 1;
+        order = a.emoji + b.emoji;
+      });
+      box.update();
+      expect(hits === 1 && order === 'AB', 'contact ' + hits + ' ' + order);
+      second.x = 41;
+      box.update();
+      expect(hits === 1, 'separated pair reported again');
+      second.x = 20;
+      off();
+      box.update();
+      expect(hits === 1, 'unsubscribe');
+      first.x = NaN;
+      const extra = box.onCollision(() => { hits += 1; });
+      box.update();
+      expect(hits === 1, 'non-finite pair');
+      extra();
+    }
+
+    function checkKeys() {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k' }));
+      expect(engine.isKeyDown('k'), 'keydown');
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'k' }));
+      expect(!engine.isKeyDown('k'), 'keyup');
+      engine.beep(440, 30);
+    }
+
+    function checkPaint() {
+      engine.canvas.draw();
+      const pixels = engine.canvas.ctx.getImageData(0, 0, 480, 270).data;
+      let ink = 0;
+      for (let i = 3; i < pixels.length; i += 16) if (pixels[i] !== 0) ink += 1;
+      expect(ink > 40, 'canvas stayed blank');
+    }
+
+    function rowText(row) {
+      let text = '';
+      for (let col = 0; col < term.cols; col += 1) text += term.get(col, row).ch;
+      return text.replace(/\s+$/, '');
+    }
+  </script>
+</body>
+</html>

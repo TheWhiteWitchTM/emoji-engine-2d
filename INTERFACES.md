@@ -1,6 +1,6 @@
 # Public interfaces
 
-These four interfaces are the contract for emoji-engine-2d. The classes in `src/` implement them, and `src/index.ts` exports the classes plus the supporting types below.
+These four interfaces are the contract for emoji-engine-2d. The classes in `src/` implement them, and `src/index.ts` exports the classes plus the supporting types below. `npm run build` writes that same module to `dist/index.js`, with declarations in `dist/index.d.ts`.
 
 The shapes are ordinary TypeScript interfaces, so plain JavaScript can call the same methods.
 
@@ -208,8 +208,11 @@ interface Engine {
   /** Set per-frame velocity in pixels. */
   motion(sprite: Sprite, vx: number, vy: number): void;
 
-  /** Register a callback for living sprites whose circles overlap. */
-  onCollision(handler: CollisionHandler): void;
+  /**
+   * Register a callback for living sprites whose circles overlap.
+   * Returns a function that removes this registration.
+   */
+  onCollision(handler: CollisionHandler): () => void;
 
   /** Move living sprites, then report overlaps. */
   update(): void;
@@ -232,16 +235,18 @@ interface Engine {
 }
 ```
 
-Circle test, evaluated after the move:
+Circle test, evaluated after the move. The layer is ignored. A pair with a non-finite position or a non-finite sum of radii is not a hit.
 
 ```text
 (ax - bx)² + (ay - by)² <= (a.radius + b.radius)²
 a.radius = a.size / 2
 ```
 
-Each unordered pair of living sprites is delivered once per `update`, with the earlier sprite as `a`. The callback runs again on the next update if the circles still overlap. Several handlers are all called. Sprites with `alive === false` skip motion, collision, and painting.
+Each unordered pair of living sprites is collected once per `update`, with the sprite created earlier as `a`. Handlers then run for that fixed list. A handler that moves or kills a sprite does not add or drop pairs until the next update. The callback runs again on the next update if the circles still overlap.
 
-`start` throws if `requestAnimationFrame` is missing. A second `start` while the loop is running does nothing. `stop` during `update` still lets that frame's `canvas.draw` run, then the loop ends.
+`onCollision` returns a function that removes that registration. Calling it again does nothing. Two registrations of one function are removed separately. A handler removed before its turn does not run for later pairs. A handler registered during an update starts on the next update. Every registration that is still present when a pair is delivered receives that pair. `update` throws if it is called from a collision handler. Sprites with `alive === false` skip motion, collision, and painting.
+
+`start` throws if `requestAnimationFrame` is missing. A second `start` while the loop is running does nothing. `stop` during `update` still lets that frame's `canvas.draw` run, then the loop ends. If `update` or `draw` throws, the loop stops and `start` may be called again.
 
 `isKeyDown` reads `keydown` / `keyup` on `window` when `window.addEventListener` exists. There is no listener on a headless host, so every key reads as up.
 
@@ -277,6 +282,8 @@ Class names on the chrome, for styling: `ee-wrap`, `ee-header`, `ee-title`, `ee-
 ## Minimal scene
 
 ```js
+import { Engine, Terminal, Utilities } from 'emoji-engine-2d';
+
 const engine = new Engine({ width: 800, height: 600 });
 const ui = Utilities.wrap(engine.canvas, { title: 'Witch Hunt' });
 document.body.appendChild(ui.wrap);
@@ -287,8 +294,11 @@ term.write('Witch Hunt\n');
 const witch = engine.sprite('🧙‍♀️', 400, 300, 48);
 const hunter = engine.sprite('✝️', 100, 300, 36, 'entities');
 engine.motion(hunter, 1.2, 0.3);
-engine.onCollision((a, b) => console.log(a.emoji, 'hit', b.emoji));
+const off = engine.onCollision((a, b) => {
+  console.log(a.emoji, 'hit', b.emoji);
+  off();
+});
 engine.start();
 ```
 
-`examples/demo.ts` is this scene with positions that meet, plus checks for the wrap, the terminal buffer, the layers, and the camera. `npm run demo` runs it.
+`examples/demo.js` is this scene with positions that meet, plus checks for the wrap, the terminal buffer, the layers, the camera, and collision. It imports `../dist/index.js`. `npm run demo` builds, then runs it with Node. The script-tag build is `dist/emoji-engine-2d.js`, which assigns `globalThis.EmojiEngine`.

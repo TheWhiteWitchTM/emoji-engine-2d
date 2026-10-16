@@ -1,4 +1,4 @@
-import { Canvas, type Drawable, type Point } from './canvas.ts';
+import { Canvas, type Drawable, type Point } from './canvas.js';
 
 /** One cell in the terminal buffer. Colors are optional. */
 export interface Cell {
