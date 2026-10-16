@@ -1,0 +1,22 @@
+{
+  "name": "emoji-engine-2d",
+  "version": "0.1.0",
+  "description": "A small 2D engine for emoji-native games. Terminal and sprites share one canvas.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "demo": "tsx examples/demo.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}
