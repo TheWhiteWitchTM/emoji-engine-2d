@@ -22,7 +22,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/bundle.js",
+    "build": "node build.js",
     "prepare": "npm run build",
     "demo": "npm run build && node examples/demo.js",
     "typecheck": "tsc --noEmit"
