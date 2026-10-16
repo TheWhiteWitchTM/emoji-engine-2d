@@ -1,5 +1,9 @@
 # emoji-engine-2d
 
+**Alpha.** This is alpha-level code. Public interfaces and behavior can change between versions, and a change can break callers. Use it at your own risk.
+
+A release candidate is the point where the public interfaces freeze. Until then, treat [INTERFACES.md](INTERFACES.md) as a description of the code you have, and read [CHANGES.md](CHANGES.md) before you upgrade.
+
 A small, interface-driven 2D engine for emoji-native games.
 
 It supports two complementary styles in one package:
@@ -15,7 +19,7 @@ Designed for the kind of games that lived between the late 1970s and the early 2
 
 - Canvas with named layers, a camera, and `drawEmoji`
 - Sprites you place on any layer, move with `vx` / `vy`, and collide as circles
-- Terminal cell buffer (cursor, 16-color cells, batched redraw) that paints through a Canvas, ignores the camera, and exposes that canvas
+- Terminal cell buffer (ECMA-48 / ANSI X3.64 sequences, the 16- and 256-color palettes, direct color, VT100 line drawing, batched redraw) that paints through a Canvas, ignores the camera, and exposes that canvas
 - Optional Utilities chrome: title, middle slot, fullscreen button, plain footer div
 - `isKeyDown`, `onKey`, and a short `beep`
 - Plain JavaScript in `dist/` for an `import`, and script-tag builds in `browser/`
@@ -92,6 +96,7 @@ A page can load the same constructors from the script build. `EmojiEngine` is th
 
 ## Docs
 
+- [CHANGES.md](CHANGES.md) — behavior a caller can observe, including breaks while this stays alpha
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the four pieces and how a frame runs
 - [INTERFACES.md](INTERFACES.md) — the contracts the source implements
 

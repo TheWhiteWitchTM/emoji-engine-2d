@@ -33,6 +33,7 @@ term.write('A hunter crosses the heath.');
 
 checkChrome();
 checkTerminal();
+checkAnsi();
 checkCollision();
 
 const witch = engine.sprite('🧙‍♀️', 360, 180, 48);
@@ -115,6 +116,357 @@ function checkTerminal() {
   if (line(term, 0) !== 'Witch Hunt') fail(`row 0: ${line(term, 0)}`);
   if (line(term, 1) !== 'A hunter crosses the heath.') fail(`row 1: ${line(term, 1)}`);
   if (term.canvas !== engine.canvas) fail('terminal must draw on the engine canvas');
+}
+
+function checkAnsi() {
+  const plain = new Terminal({ cols: 4, rows: 1, cellWidth: 12, cellHeight: 18 });
+  plain.write('W');
+  const cell = plain.get(0, 0);
+  expect(cell.ch, 'W', 'plain glyph');
+  expect(String(cell.fg), '15', 'plain fg');
+  expect(String(cell.bg), 'null', 'plain bg');
+  expect(String(cell.bright), 'false', 'plain bright');
+  expect(String(cell.bold), 'undefined', 'plain bold');
+  expect(String(cell.fgRgb), 'undefined', 'plain rgb');
+  const paints = watch(plain);
+  const glyph = paints.find((item) => item.kind === 'text');
+  if (!glyph || glyph.text !== 'W' || glyph.x !== 6 || glyph.y !== 9) fail('plain glyph anchor');
+  expect(glyph.fill, '#ffffff', 'plain ink');
+  expect(glyph.font, '14px monospace', 'plain face');
+  if (paints.some((item) => item.kind === 'rect' && item.h === 18)) fail('plain cell painted a background');
+
+  const page = new Terminal({ cols: 6, rows: 3 });
+  page.write('ab\ncd');
+  expect(page.get(0, 0).ch + page.get(1, 0).ch, 'ab', 'newline left the first line');
+  expect(page.get(0, 1).ch + page.get(1, 1).ch, 'cd', 'newline started at column 0');
+  expect(`${page.cursor.col},${page.cursor.row}`, '2,1', 'cursor after newline');
+  page.write('\rZ');
+  expect(page.get(0, 1).ch, 'Z', 'carriage return');
+  expect(page.get(1, 1).ch, 'd', 'return did not erase');
+
+  const wrapped = new Terminal({ cols: 4, rows: 2 });
+  wrapped.write('abcdefgh');
+  expect(raw(wrapped, 0), 'efgh', 'wrap scroll');
+  expect(`${wrapped.cursor.col},${wrapped.cursor.row}`, '0,1', 'cursor after wrap scroll');
+  wrapped.clear();
+  wrapped.write('ab\ncd\nef');
+  expect(raw(wrapped, 0), 'cd  ', 'newline scroll');
+  expect(raw(wrapped, 1).slice(0, 2), 'ef', 'newline scroll bottom');
+
+  const addressed = new Terminal({ cols: 4, rows: 2 });
+  addressed.write('ab\ncd\x1b[9A');
+  expect(addressed.get(0, 0).ch, 'a', 'cursor up must not scroll');
+  expect(`${addressed.cursor.col},${addressed.cursor.row}`, '2,0', 'cursor up clamps');
+  addressed.write('\x1b[99;99H');
+  expect(addressed.get(0, 1).ch, 'c', 'cup clamp keeps the buffer');
+  expect(`${addressed.cursor.col},${addressed.cursor.row}`, '3,1', 'cup clamps inside the page');
+  addressed.write('\x1b[H');
+  expect(`${addressed.cursor.col},${addressed.cursor.row}`, '0,0', 'cup default');
+  addressed.write('\x1b[0;0f');
+  expect(`${addressed.cursor.col},${addressed.cursor.row}`, '0,0', 'hvp zero is home');
+
+  const flow = new Terminal({ cols: 4, rows: 2 });
+  flow.write('ab\ncd');
+  flow.write('\x1bD');
+  expect(flow.get(0, 0).ch, 'c', 'index scrolls at the bottom');
+  expect(`${flow.cursor.col},${flow.cursor.row}`, '2,1', 'index keeps the column');
+  const lifted = new Terminal({ cols: 4, rows: 2 });
+  lifted.write('ab\ncd\x1b[H\x1bM');
+  expect(lifted.get(0, 1).ch, 'a', 'reverse index scrolls at the top');
+  expect(`${lifted.cursor.col},${lifted.cursor.row}`, '0,0', 'reverse index stays home');
+
+  const modes = new Terminal({ cols: 6, rows: 3 });
+  modes.write('AB\x1b[20l\nC');
+  expect(modes.get(2, 1).ch, 'C', 'standard line feed keeps the column');
+  expect(modes.get(0, 1).ch, ' ', 'standard line feed does not return');
+  modes.write('\x1b[20h\nD');
+  expect(modes.get(0, 2).ch, 'D', 'newline mode returns');
+
+  const edited = new Terminal({ cols: 6, rows: 1 });
+  edited.write('ABCD\x1b[1;2H\x1b[2@');
+  expect(raw(edited, 0), 'A  BCD', 'insert characters');
+  edited.clear();
+  edited.write('ABCD\x1b[1;2H\x1b[P');
+  expect(raw(edited, 0), 'ACD   ', 'delete character');
+  edited.clear();
+  edited.write('ABCD\x1b[1;2H\x1b[2X');
+  expect(raw(edited, 0), 'A  D  ', 'erase characters');
+  expect(`${edited.cursor.col}`, '1', 'erase leaves the cursor');
+
+  const lines = new Terminal({ cols: 4, rows: 3 });
+  lines.write('aa\nbb\ncc\x1b[2;1H\x1b[L');
+  expect(raw(lines, 0).slice(0, 2) + raw(lines, 1).slice(0, 2) + raw(lines, 2).slice(0, 2), 'aa  bb', 'insert line');
+  lines.clear();
+  lines.write('aa\nbb\ncc\x1b[2;1H\x1b[M');
+  expect(raw(lines, 0).slice(0, 2) + raw(lines, 1).slice(0, 2), 'aacc', 'delete line');
+
+  const shifted = new Terminal({ cols: 4, rows: 1 });
+  shifted.write('AB\x1b[1 @');
+  expect(raw(shifted, 0), 'B   ', 'scroll left');
+  shifted.clear();
+  shifted.write('AB\x1b[1 A');
+  expect(raw(shifted, 0), ' AB ', 'scroll right');
+
+  const tabs = new Terminal({ cols: 20, rows: 1 });
+  tabs.write('A\tB');
+  expect(tabs.get(0, 0).ch, 'A', 'tab source');
+  expect(tabs.get(8, 0).ch, 'B', 'default tab stop');
+  tabs.clear();
+  tabs.write('\x1b[3G\x1bH\rX\tY');
+  expect(tabs.get(0, 0).ch + tabs.get(2, 0).ch, 'XY', 'set tab stop');
+  const margin = new Terminal({ cols: 20, rows: 2 });
+  margin.write('\x1b[3g\rA\tB');
+  expect(margin.get(19, 0).ch, 'B', 'cleared tabs run to the margin');
+  expect(`${margin.cursor.col},${margin.cursor.row}`, '0,1', 'margin wrap');
+
+  const pen = new Terminal({ cols: 8, rows: 1 });
+  pen.write('\x1b[1;31;42mZ');
+  expect(String(pen.get(0, 0).fg), '1', 'sgr fg');
+  expect(String(pen.get(0, 0).bg), '2', 'sgr bg');
+  expect(String(pen.get(0, 0).bright), 'true', 'sgr bright');
+  expect(String(pen.get(0, 0).bold), 'true', 'sgr bold');
+  const boldPaint = watch(pen).find((item) => item.kind === 'text');
+  expect(boldPaint && boldPaint.font, 'bold 16px monospace', 'bold face');
+  expect(boldPaint && boldPaint.fill, '#ff5555', 'bright red');
+  pen.clear();
+  pen.write('\x1b[1;21mZ');
+  expect(String(pen.bright), 'true', 'double underline is not bold off');
+  expect(String(pen.get(0, 0).underline), '2', 'ecma double underline');
+  pen.clear();
+  pen.write('\x1b[1;22mZ');
+  expect(String(pen.bright), 'false', 'intensity off');
+  expect(String(pen.get(0, 0).bold), 'undefined', 'bold off');
+  pen.clear();
+  pen.write('\x1b[1;mZ');
+  expect(String(pen.bright), 'false', 'empty sgr parameter resets');
+  pen.clear();
+  pen.write('\x1b[33mZ');
+  expect(watch(pen).find((item) => item.kind === 'text').fill, '#aa5500', 'classic brown');
+  pen.clear();
+  pen.write('\x1b[90mZ');
+  expect(String(pen.get(0, 0).fg), '8', 'aixterm bright black');
+  expect(String(pen.bright), 'false', 'aixterm color is not the bold flag');
+  pen.clear();
+  pen.write('\x1b[38;5;196mZ');
+  expect(String(pen.get(0, 0).fg), '196', 'indexed color');
+  expect(watch(pen).find((item) => item.kind === 'text').fill, 'rgb(255, 0, 0)', 'color cube');
+  pen.clear();
+  pen.color(232);
+  pen.write('G');
+  expect(watch(pen).find((item) => item.kind === 'text').fill, 'rgb(8, 8, 8)', 'gray ramp');
+  pen.clear();
+  pen.color(15);
+  pen.write('\x1b[38;2;10;20;30mZ');
+  expect(String(pen.get(0, 0).fg), 'null', 'direct color clears the index');
+  expect(rgbOf(pen.get(0, 0).fgRgb), '10,20,30', 'semicolon direct color');
+  pen.clear();
+  pen.write('\x1b[38:2::9:8:7mZ');
+  expect(rgbOf(pen.get(0, 0).fgRgb), '9,8,7', 'iso direct color');
+  pen.clear();
+  pen.write('\x1b[38:2:4:5:6mZ');
+  expect(rgbOf(pen.get(0, 0).fgRgb), '4,5,6', 'direct-color shorthand');
+  pen.clear();
+  pen.write('\x1b[38:5:42mZ');
+  expect(String(pen.get(0, 0).fg), '42', 'iso indexed color');
+  pen.clear();
+  pen.write('\x1b[0m\x1b[38:2:9:1:2:3mZ');
+  expect(String(pen.get(0, 0).fg), '15', 'unknown color space');
+  expect(String(pen.get(0, 0).fgRgb), 'undefined', 'unknown color space stores nothing');
+  pen.clear();
+  pen.write('\x1b[38:3::0:255:255mZ');
+  expect(rgbOf(pen.get(0, 0).fgRgb), '255,0,0', 'cmy red');
+  pen.clear();
+  pen.write('\x1b[41;48:1mZ');
+  expect(String(pen.get(0, 0).bg), 'null', 'iso transparent background');
+  pen.clear();
+  pen.write('\x1b[31;41;39;49mZ');
+  expect(String(pen.get(0, 0).fg), '15', 'default foreground');
+  expect(String(pen.get(0, 0).bg), 'null', 'default background');
+  pen.clear();
+  pen.write('\x1b[1;38;5;196;4mZ');
+  expect(String(pen.get(0, 0).bold), 'true', 'rendition around indexed color');
+  expect(String(pen.get(0, 0).fg), '196', 'indexed color among renditions');
+  expect(String(pen.get(0, 0).underline), '1', 'underline after indexed color');
+  pen.clear();
+  pen.write('\x1b[38;2;1;2;3;48;2;4;5;6m');
+  pen.color(2);
+  pen.write('Z');
+  expect(String(pen.get(0, 0).fg), '2', 'color() index');
+  expect(String(pen.get(0, 0).fgRgb), 'undefined', 'color() clears direct foreground');
+  expect(rgbOf(pen.get(0, 0).bgRgb), '4,5,6', 'omitted background stays');
+  pen.color(2, null);
+  pen.write('Y');
+  expect(String(pen.get(1, 0).bg), 'null', 'explicit null background');
+  expect(String(pen.get(1, 0).bgRgb), 'undefined', 'explicit null clears direct background');
+
+  const intensity = new Terminal({ cols: 2, rows: 1, cellHeight: 18 });
+  intensity.bright = true;
+  intensity.color(1);
+  intensity.write('W');
+  const brightPaint = watch(intensity).find((item) => item.kind === 'text');
+  expect(brightPaint && brightPaint.font, '14px monospace', 'bright flag is not a bold face');
+  expect(brightPaint && brightPaint.fill, '#ff5555', 'bright flag still shifts 0-7');
+
+  const drawn = new Terminal({ cols: 4, rows: 1, cellHeight: 20 });
+  drawn.write('\x1b[2;3;4;7;8;9mZ');
+  expect(String(drawn.get(0, 0).faint), 'true', 'faint');
+  expect(String(drawn.get(0, 0).italic), 'true', 'italic');
+  expect(String(drawn.get(0, 0).underline), '1', 'underline');
+  expect(String(drawn.get(0, 0).reverse), 'true', 'reverse');
+  expect(String(drawn.get(0, 0).conceal), 'true', 'conceal');
+  expect(String(drawn.get(0, 0).strike), 'true', 'strike');
+  const hidden = watch(drawn);
+  if (hidden.some((item) => item.kind === 'text')) fail('concealed glyph was painted');
+  drawn.clear();
+  drawn.write('\x1b[0;31;42;7mZ');
+  const reversed = watch(drawn);
+  const block = reversed.find((item) => item.kind === 'rect' && item.h === 20);
+  const letter = reversed.find((item) => item.kind === 'text');
+  expect(block && block.fill, '#aa0000', 'reverse background');
+  expect(letter && letter.fill, '#00aa00', 'reverse foreground');
+  drawn.clear();
+  drawn.write('\x1b[0;5mZ');
+  expect(String(drawn.get(0, 0).blink), '1', 'blink is stored');
+  if (!watch(drawn).some((item) => item.kind === 'text' && item.text === 'Z')) {
+    fail('blink hid the glyph');
+  }
+  const faint = watch((() => {
+    const box = new Terminal({ cols: 2, rows: 1 });
+    box.write('\x1b[2mZ');
+    return box;
+  })()).find((item) => item.kind === 'text');
+  expect(String(faint && faint.alpha), '0.6', 'faint alpha');
+
+  const kept = new Terminal({ cols: 8, rows: 1 });
+  kept.write('\x1b[41mHELLO\x1b[1;2H\x1b[K');
+  expect(kept.get(0, 0).ch, 'H', 'erase line keeps the start');
+  expect(String(kept.get(0, 0).bg), '1', 'erase line keeps colors already written');
+  expect(kept.get(1, 0).ch, ' ', 'erase line clears');
+  expect(String(kept.get(1, 0).bg), 'undefined', 'erased cell is uncolored');
+  kept.clear();
+  kept.write('Hello\x1b[2J');
+  expect(kept.get(0, 0).ch, ' ', 'erase display');
+  expect(`${kept.cursor.col}`, '5', 'erase display leaves the cursor');
+  kept.write('\x1b[H\x1b[31mHi\x1b[3J');
+  expect(raw(kept, 0).trimEnd(), 'Hi', 'no scrollback to erase');
+  kept.clear();
+  expect(`${kept.cursor.col},${kept.cursor.row}`, '0,0', 'clear homes');
+  kept.write('Z');
+  expect(String(kept.get(0, 0).fg), '1', 'clear keeps the pen');
+
+  const graphic = new Terminal({ cols: 8, rows: 1 });
+  graphic.write('\x1b(0qx\x1b(Bq');
+  expect(graphic.get(0, 0).ch + graphic.get(1, 0).ch + graphic.get(2, 0).ch, '─│q', 'dec special graphics');
+  graphic.clear();
+  graphic.write('\x1b)0\x0eq\x0fX');
+  expect(graphic.get(0, 0).ch + graphic.get(1, 0).ch, '─X', 'shift out');
+  graphic.clear();
+  graphic.write('\x1b*0\x1bNqX');
+  expect(graphic.get(0, 0).ch + graphic.get(1, 0).ch, '─X', 'single shift');
+  graphic.clear();
+  graphic.write('\x1b(A#\x1b(B#');
+  expect(graphic.get(0, 0).ch + graphic.get(1, 0).ch, '£#', 'uk pound');
+  graphic.write('\x1b(0q\x1bcq');
+  expect(graphic.get(0, 0).ch, 'q', 'reset restores ascii');
+  expect(String(graphic.fg), '15', 'reset restores the pen');
+
+  const memory = new Terminal({ cols: 8, rows: 3 });
+  memory.write('\x1b[2;3H\x1b[31m\x1b7\x1b[H\x1b[32m\x1b8Z');
+  expect(`${memory.cursor.col},${memory.cursor.row}`, '3,1', 'restored cursor');
+  expect(String(memory.get(2, 1).fg), '1', 'restored pen');
+
+  const again = new Terminal({ cols: 8, rows: 1 });
+  again.write('A\x1b[31m\x1b[b');
+  expect(String(again.get(0, 0).fg), '15', 'original repeat source');
+  expect(again.get(1, 0).ch, 'A', 'repeat');
+  expect(String(again.get(1, 0).fg), '1', 'repeat uses the current pen');
+  again.clear();
+  again.write('A\x1b[0b');
+  expect(again.get(1, 0).ch, ' ', 'zero repeat adds nothing');
+  again.clear();
+  again.write('\x1b[4hABCD\x1b[1;2Hxy');
+  expect(raw(again, 0), 'AxyBCD  ', 'insert mode');
+
+  const quiet = new Terminal({ cols: 8, rows: 1 });
+  quiet.write('AB\bC');
+  expect(raw(quiet, 0).trimEnd(), 'AC', 'backspace');
+  quiet.clear();
+  quiet.write('A\x00B\x7fC');
+  expect(raw(quiet, 0).trimEnd(), 'ABC', 'nul and delete are ignored');
+  quiet.clear();
+  quiet.write('A\x1b[999~B');
+  expect(raw(quiet, 0).trimEnd(), 'AB', 'unknown sequence is ignored');
+  expect(String(quiet.get(1, 0).fg), '15', 'unknown sequence does not change the pen');
+  quiet.clear();
+  quiet.write('A\x1b]0;Witch\x07B');
+  expect(raw(quiet, 0).trimEnd(), 'AB', 'osc ends on bel');
+  quiet.clear();
+  quiet.write('A\x1b]0;Witch\x1b\\B');
+  expect(raw(quiet, 0).trimEnd(), 'AB', 'osc ends on st');
+  quiet.clear();
+  quiet.write('A\x1b[?1049hB');
+  expect(raw(quiet, 0).trimEnd(), 'AB', 'private mode is ignored');
+  quiet.clear();
+  quiet.write('A\x1b[31\x18B');
+  expect(raw(quiet, 0).trimEnd(), 'AB', 'cancel drops the sequence');
+  expect(String(quiet.get(1, 0).fg), '15', 'cancel drops the color');
+  quiet.clear();
+  quiet.write('\x1b[31');
+  quiet.write('mZ');
+  expect(String(quiet.get(0, 0).fg), '1', 'sequence split across writes');
+  quiet.clear();
+  quiet.write('AB');
+  quiet.put('\x1b');
+  quiet.put('[');
+  quiet.put('H');
+  quiet.put('Q');
+  expect(quiet.get(0, 0).ch, 'Q', 'put parses one byte at a time');
+  expect(quiet.get(1, 0).ch, 'B', 'put left the other cell');
+  quiet.set(0, 0, '\x1b');
+  expect(quiet.get(0, 0).ch, '\x1b', 'set does not parse');
+
+  const asked = new Terminal({ cols: 10, rows: 3 });
+  asked.write('AB\x1b[6n');
+  expect(asked.readReply(), '\x1b[1;3R', 'cursor report');
+  asked.write('\x1b[c');
+  expect(asked.readReply(), '\x1b[?0c', 'device attributes');
+  expect(asked.readReply(), '', 'reply queue empty');
+  asked.write('AB\u009bH');
+  expect(`${asked.cursor.col},${asked.cursor.row}`, '0,0', '8-bit csi');
+
+  const marks = new Terminal({ cols: 4, rows: 4 });
+  marks.write('A\vB\fC');
+  expect(marks.get(0, 0).ch + marks.get(0, 1).ch + marks.get(0, 2).ch, 'ABC', 'vt and ff follow line feed');
+  const emoji = new Terminal({ cols: 8, rows: 1 });
+  emoji.write('🧙‍♀️');
+  expect(emoji.get(0, 0).ch, '🧙', 'emoji code point');
+  expect(emoji.get(1, 0).ch, '\u200D', 'zwj stays its own cell');
+  expect(emoji.get(2, 0).ch, '♀', 'gender sign');
+  expect(emoji.get(3, 0).ch, '\uFE0F', 'variation selector');
+
+  const batched = new Terminal({ cols: 8, rows: 2 });
+  let draws = 0;
+  const draw = batched.canvas.draw.bind(batched.canvas);
+  batched.canvas.draw = () => {
+    draws += 1;
+    draw();
+  };
+  batched.beginFrame();
+  const parked = draws;
+  batched.write('A');
+  batched.write('\x1b[31mB');
+  if (draws !== parked) fail('batched writes drew early');
+  batched.endFrame();
+  if (draws !== parked + 1) fail('outer endFrame draws once');
+  expect(String(batched.get(1, 0).fg), '1', 'batched color');
+
+  const api = new Terminal({ cols: 4, rows: 1 });
+  api.color(3, 5);
+  api.write('Z');
+  api.color(1);
+  expect(String(api.bg), '5', 'color keeps bg');
+  api.write('Y');
+  expect(`${api.get(1, 0).fg},${api.get(1, 0).bg}`, '1,5', 'later color');
 }
 
 function checkCamera(witch) {
@@ -338,9 +690,50 @@ function textOf(node) {
 }
 
 function line(terminal, row) {
+  return raw(terminal, row).trimEnd();
+}
+
+function raw(terminal, row) {
   let text = '';
   for (let col = 0; col < terminal.cols; col += 1) text += terminal.get(col, row).ch;
-  return text.trimEnd();
+  return text;
+}
+
+function rgbOf(rgb) {
+  if (!rgb) return 'missing';
+  return `${rgb.r},${rgb.g},${rgb.b}`;
+}
+
+function watch(terminal) {
+  const ctx = terminal.canvas.ctx;
+  const seen = [];
+  const text = ctx.fillText.bind(ctx);
+  const rect = ctx.fillRect.bind(ctx);
+  ctx.fillText = (value, x, y) => {
+    seen.push({
+      kind: 'text',
+      text: String(value),
+      x: Number(x),
+      y: Number(y),
+      fill: String(ctx.fillStyle),
+      font: String(ctx.font),
+      alpha: ctx.globalAlpha,
+    });
+    text(value, x, y);
+  };
+  ctx.fillRect = (x, y, w, h) => {
+    seen.push({
+      kind: 'rect',
+      x: Number(x),
+      y: Number(y),
+      w: Number(w),
+      h: Number(h),
+      fill: String(ctx.fillStyle),
+    });
+    rect(x, y, w, h);
+  };
+  terminal.canvas.draw();
+  return seen;
 }
 
 function fail(message) {

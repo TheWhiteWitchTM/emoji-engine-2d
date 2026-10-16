@@ -32,11 +32,24 @@ interface Sprite extends Drawable {
 
 interface Cell {
   ch: string;
-  fg?: number | null;
-  bg?: number | null;
+  fg?: number | null;   // 0–255, or null when fgRgb or the default ink is used
+  bg?: number | null;   // 0–255; null and omitted stay transparent
   fgRgb?: { r: number; g: number; b: number } | null;
   bgRgb?: { r: number; g: number; b: number } | null;
-  bright?: boolean;
+  bright?: boolean;     // foreground indexes 0–7 draw as 8–15
+  bold?: boolean;       // SGR bold face; not implied by bright
+  faint?: boolean;
+  italic?: boolean;
+  underline?: 1 | 2;    // 1 single, 2 ECMA-48 double
+  blink?: 1 | 2;        // stored; the glyph stays visible
+  reverse?: boolean;
+  conceal?: boolean;
+  strike?: boolean;
+  overline?: boolean;
+  framed?: boolean;
+  encircled?: boolean;
+  fraktur?: boolean;
+  font?: number;        // alternate font 1–9; the grid stays monospace
 }
 
 interface CanvasOptions {
@@ -145,22 +158,31 @@ interface Terminal extends Drawable {
   /** Stored on cells written from now on. Default false. */
   bright: boolean;
 
-  /** Write text at the cursor. Honors \n and \r, wraps, and scrolls. */
+  /**
+   * Write text at the cursor.
+   * Obeys ECMA-48 / ANSI X3.64, wraps, and scrolls.
+   * \n, VT, and FF are line feeds. Newline mode starts on, so they
+   * also return to column 0. CSI 20 l keeps the column.
+   */
   write(text: string): void;
 
-  /** Write one code point at the cursor and advance. */
+  /** Feed one code point through the same parser as write, then redraw. */
   put(ch: string): void;
 
-  /** Replace one cell. A string uses the current colors. Out of range is ignored. */
+  /** Replace one cell. A string is stored as-is and is not parsed. Out of range is ignored. */
   set(col: number, row: number, value: Cell | string): void;
 
   /** Copy one cell. Out of range returns a space. */
   get(col: number, row: number): Cell;
 
-  /** Fill the buffer with spaces and move the cursor home. */
+  /** Fill the buffer with spaces and move the cursor home. The pen is kept. */
   clear(): void;
 
-  /** Set the colors for later write and put calls. bg keeps its current value when omitted. */
+  /**
+   * Set the color indexes for later write and put calls.
+   * An omitted bg is kept, including a direct-color background.
+   * The fg index replaces a direct-color foreground.
+   */
   color(fg: number | null, bg?: number | null): void;
 
   /** Hold redraws. Calls may nest. */
@@ -175,6 +197,9 @@ interface Terminal extends Drawable {
   /** True while key (KeyboardEvent.key) is held. */
   isKeyDown(key: string): boolean;
 
+  /** Next device report, or '' when none is waiting. */
+  readReply(): string;
+
   /**
    * Paint the grid in screen space. The camera argument is ignored,
    * so a following view does not scroll the cells.
@@ -183,9 +208,29 @@ interface Terminal extends Drawable {
 }
 ```
 
-Color indexes use the classic 16-color palette. `bright` draws foreground indexes 0–7 as 8–15. `fgRgb` and `bgRgb` override the index on that cell. A null background does not fill the cell.
+Indexes 0–15 use the classic palette (`#aa5500` is color 3). `bright` draws foreground indexes 0–7 as 8–15 and does not change the font. Indexes 16–231 are the 6×6×6 cube (`0` is 0, otherwise `55 + step * 40`) and 232–255 are gray `8 + 10 * (index - 232)`. `fgRgb` and `bgRgb` override the index. A null background does not fill the cell, including after erase, scroll, and `clear`.
 
-`write` iterates code points, so a multi-code-point emoji occupies several cells. `put` keeps the first code point and drops the rest.
+`write` and `put` parse ECMA-48. The sequences that change the buffer:
+
+| Sequence | Effect |
+| --- | --- |
+| CUU CUD CUF CUB CNL CPL CHA CUP VPA HVP HPA HPR VPR | Move. Stops at the edge. `0` and omitted mean 1. Does not scroll. |
+| IND `ESC D`, RI `ESC M`, NEL `ESC E`, LF VT FF CR BS HT | Index scrolls at the bottom. Reverse index scrolls at the top. |
+| ED EL ECH ICH DCH IL DL SU SD, SL `CSI Pn SP @`, SR `CSI Pn SP A` | Edit. Erased cells are uncolored spaces. ED 2 does not home. ED 3 is ignored. |
+| SGR | Rendition and color, below. |
+| SM RM | Mode 4 is insert. Mode 20 is newline. Other modes are ignored. |
+| HTS TBC CHT CBT | Tabs. Default stops are every 8 columns. |
+| REP | Repeat the preceding graphic with the current pen. Omitted means 1. `0` repeats nothing. |
+| DA DSR | `CSI c` replies `CSI ? 0 c`. `CSI 5 n` replies `CSI 0 n`. `CSI 6 n` replies `CSI r ; c R`, 1-based. |
+| `ESC 7` / `ESC 8`, `CSI s` / `CSI u` | DEC and SCO save and restore of the cursor, the pen, and the character sets. |
+| `ESC c` | Reset the screen, the pen, the sets, and the tabs. |
+| `ESC (`, `ESC )`, `ESC *`, `ESC +` | Designate a set: `B` ASCII, `A` UK, `0` DEC special graphics. |
+
+SGR 0 resets the pen to foreground 15, a transparent background, and no rendition. 1 is bold and bright, 2 faint, 3 italic, 4 underline, 5 slow blink, 6 rapid blink, 7 reverse, 8 conceal, 9 strike, 10–19 fonts, 20 fraktur, 21 double underline, 22 normal intensity, 23 not italic or fraktur, 24 not underlined, 25 steady, 27 positive, 28 revealed, 29 not struck, 30–37 and 40–47 the classic colors, 39 and 49 the defaults, 51 frame, 52 encircle, 53 overline, 54 and 55 cancel those. 90–97 and 100–107 select palette entries 8–15. They are the usual bright colors, not an ECMA-48 parameter. 38 and 48 take an ISO 8613-6 color: `38:2::r:g:b`, `38:2:0:r:g:b`, `38:5:n`, plus CMY (`:3:`) and CMYK (`:4:`). A color space other than the default is ignored. The shorthand `38:2:r:g:b` and the semicolon forms `38;2;r;g;b` and `38;5;n` are accepted. An empty SGR parameter is 0.
+
+`ESC ( 0` maps the VT100 special-graphics bytes onto the Unicode line-drawing characters (`q` is `─`, `x` is `│`, and the rest of that set). Shift Out invokes G1, Shift In invokes G0, `ESC n` and `ESC o` lock G2 and G3, and `ESC N` and `ESC O` are single shifts. BEL rings when audio is available. Other C0 controls are ignored and are not stored. CAN and SUB cancel a sequence. OSC, DCS, SOS, PM, and APC are discarded through ST (`ESC \`), and OSC also ends on BEL, so they cannot change the palette or the document title. A CSI parameter that starts with `<`, `=`, `>`, or `?` is private and is ignored.
+
+`write` iterates code points, so a multi-code-point emoji occupies several cells. `put` keeps the first code point and drops the rest. A sequence may be split across `write` and `put` calls.
 
 Mutations redraw through `canvas.draw()` unless a `beginFrame` is open. That redraw paints every layer on the shared canvas, including sprites.
 

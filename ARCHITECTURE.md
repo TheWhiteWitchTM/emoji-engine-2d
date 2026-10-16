@@ -30,13 +30,19 @@ The camera is the world point drawn at the top-left of the bitmap. `setCamera` s
 
 `src/terminal.ts` is a cell buffer and a `Drawable`. It always has a `canvas`. Pass one in to share a surface with the engine, or omit it and the terminal creates a canvas sized to the grid.
 
-`write`, `put`, `set`, and `clear` edit the buffer. `get` returns a copy of one cell. `write` walks the string one code point at a time, honors `\n` and `\r`, wraps at the last column, and scrolls when the cursor leaves the bottom row. `put` writes a single code point at the cursor and advances. Cells remember an optional ANSI index, an optional RGB override, and a bright flag. A missing background stays transparent, so sprite layers can show through empty cells.
+`write`, `put`, `set`, and `clear` edit the buffer. `get` returns a copy of one cell. `write` and `put` walk code points and obey ECMA-48 (ANSI X3.64 / ISO/IEC 6429): C0 controls, ESC, CSI, and the 8-bit C1 forms. `set` stores its string as one cell and does not parse controls. A printable code point occupies one cell, so a multi-code-point emoji still occupies several. The cursor wraps at the last column and scrolls when a line feed, index, or wrap moves it off the bottom row. Cursor addressing stops at the edges and does not scroll.
+
+`\n`, vertical tab, and form feed are line feeds. The buffer starts in ECMA-48 newline mode, so a line feed also returns to column 0. That is the line break `write` already used. `CSI 20 l` selects the standard default, where a line feed keeps the column. `\r` only returns. Index (`ESC D`) never returns; next line (`ESC E`) always does.
+
+Cells remember a color index from 0 to 255, an optional direct RGB color, the bright flag, and the ECMA-48 rendition (bold, faint, italic, underline, blink, reverse, conceal, strike, overline, frame, circle, fraktur, font). Indexes 0–15 are the existing palette, brown included. Indexes 16–231 are the 6×6×6 cube and 232–255 are the gray ramp. Direct color is SGR 38/48 as ISO 8613-6 subparameters (`38:2::r:g:b`, `38:5:n`) and as the semicolon form (`38;2;r;g;b`, `38;5;n`). A missing background stays transparent, so sprite layers show through empty cells. Erase and scroll clear to that same blank cell; they do not paint the current background. SGR 21 is the ECMA-48 double underline. Blink is stored and the glyph stays drawn, because the buffer paints when the text changes. Alternate fonts and fraktur are stored, and the grid stays monospace. Proportional spacing is ignored for the same reason.
+
+`ESC ( 0` selects the VT100 special-graphics set, the character-cell line drawing. `ESC ( B` returns to US ASCII and `ESC ( A` selects the UK set. Shift Out / Shift In and the single shifts invoke the designated sets. Unknown designations fall back to ASCII. Operating-system and device-control strings are consumed and ignored, so a title or palette command cannot retint the page. Private CSI parameters are ignored. `readReply` returns a cursor report or the device-attributes reply `CSI ? 0 c`.
 
 The grid is painted in screen space. `draw` accepts the camera, because every drawable does, and ignores it. Following a sprite therefore does not scroll the text off the bitmap.
 
 After a mutation the terminal asks its canvas to `draw`, which repaints every layer on that surface. `beginFrame` / `endFrame` hold those redraws. The calls nest, and the outermost `endFrame` paints once if anything changed. A terminal-only program can refresh this way. It does not need `Engine.start`.
 
-`cursor`, `fg`, `bg`, and `bright` are the write state. `color(fg, bg)` sets the indexes used by later writes. `onKey` and `isKeyDown` listen on `window` when it exists. They keep their own key set.
+`cursor`, `fg`, `bg`, and `bright` are the write state. `bright` still means only the color shift from indexes 0–7 to 8–15. SGR 1 sets that flag and a separate bold face; SGR 22 clears both. `color(fg, bg)` sets indexes. An omitted background is left alone, including a direct-color background. `clear` blanks the screen and homes the cursor without resetting the pen. `ESC c` resets the pen, the sets, the tabs, and the screen. `onKey` and `isKeyDown` listen on `window` when it exists. They keep their own key set.
 
 ## Engine
 
