@@ -1,8 +1,8 @@
 import { Canvas, type Drawable, type Point } from './canvas.js';
 /**
  * One cell in the terminal buffer.
- * Indexes 0–15 are the classic palette. Indexes 16–255 are the indexed
- * color cube. A direct color, when set, is what gets painted.
+ * Indexes 0–15 use the active palette (`ansi` by default, or `c64`).
+ * Indexes 16–255 are the indexed color cube. A direct color, when set, is what gets painted.
  */
 export interface Cell {
     ch: string;
@@ -40,6 +40,10 @@ export interface Cell {
     /** Alternate font 1–9 (SGR 11–19). The grid still paints a monospace face. */
     font?: number;
 }
+/** Indexes 0–15. `ansi` is the classic palette. `c64` is the VIC-II order. */
+export type ColorStyle = 'ansi' | 'c64';
+/** How the caret is drawn. `underline` is the bottom bar. */
+export type CursorStyle = 'underline' | 'block' | 'bar';
 /** Options for a cell-buffer terminal. */
 export interface TerminalOptions {
     /** Columns in the buffer. Default 40. */
@@ -54,6 +58,30 @@ export interface TerminalOptions {
     cellHeight?: number;
     /** Canvas layer name. Default `terminal`. */
     layer?: string;
+    /** Palette for indexes 0–15. Default `ansi`. */
+    colorStyle?: ColorStyle;
+    /**
+     * Paper behind cells that have no background of their own.
+     * A number is a palette index. Default null, which stays transparent.
+     */
+    background?: string | number | null;
+    /** Border color around the canvas. A number is a palette index. Default null. */
+    border?: string | number | null;
+    /** Border thickness in CSS pixels. Default 2 once a border color is set. */
+    borderWidth?: number;
+    /** Draw the caret. Default true. */
+    showCursor?: boolean;
+    /** Caret color. Default `#9ee`. */
+    cursorColor?: string;
+    /** Caret shape. Default `underline`. */
+    cursorStyle?: CursorStyle;
+    /** Milliseconds between caret blinks. 0 stays lit. Default 0. */
+    cursorSpeed?: number;
+    /**
+     * Milliseconds for one slow-blink half cycle (SGR 5).
+     * Rapid blink (SGR 6) uses half of that. 0 keeps the glyph drawn. Default 0.
+     */
+    blinkSpeed?: number;
 }
 /** Key handler. `key` is `KeyboardEvent.key`. */
 export type KeyHandler = (key: string) => void;
@@ -74,6 +102,12 @@ interface TerminalContract {
     get(col: number, row: number): Cell;
     clear(): void;
     color(fg: number | null, bg?: number | null): void;
+    colorStyle(style: ColorStyle): void;
+    background(color: string | number | null): void;
+    border(color: string | number | null, width?: number): void;
+    setCursorStyle(style: CursorStyle): void;
+    cursorSpeed(ms: number): void;
+    blinkSpeed(ms: number): void;
     beginFrame(): void;
     endFrame(): void;
     onKey(handler: KeyHandler): void;
@@ -99,8 +133,28 @@ export declare class Terminal implements TerminalContract, Drawable {
     fg: number | null;
     /** Background color index used by `write` and `put`. Null stays transparent. */
     bg: number | null;
-    /** Intensity flag stored on cells written from now on. Indexes 0–7 draw as 8–15. */
+    /** Intensity flag stored on cells written from now on. Indexes 0–7 draw as 8–15 on `ansi`. */
     bright: boolean;
+    /**
+     * Palette for indexes 0–15. `ansi` keeps the classic colors, including gray at 7.
+     * Assigning this retints on the next draw. `colorStyle` also redraws and updates a border index.
+     */
+    palette: ColorStyle;
+    /**
+     * Paper behind cells with no background. A number is a palette index.
+     * Null leaves those cells transparent. `background` applies it and redraws.
+     */
+    screenColor: string | number | null;
+    /** Border color around the canvas. A number is a palette index. Null draws no border. */
+    borderColor: string | number | null;
+    /** Border thickness in CSS pixels. */
+    borderWidth: number;
+    /** When false, the caret is not drawn. Games toggle this. Default true. */
+    cursorLit: boolean;
+    /** Caret color. Default `#9ee`. Games assign this. */
+    cursorColor: string;
+    /** Caret shape. `underline` is the bottom bar and the default. */
+    cursorStyle: CursorStyle;
     private readonly cellWidth;
     private readonly cellHeight;
     private readonly cells;
@@ -150,6 +204,14 @@ export declare class Terminal implements TerminalContract, Drawable {
     private numberCommitted;
     private fillingSub;
     private stringKind;
+    private cursorMs;
+    private blinkMs;
+    private cursorEpoch;
+    private blinkEpoch;
+    private cursorTimer;
+    private blinkTimer;
+    /** Last border written by this terminal, so a game's own CSS border is left alone. */
+    private lastBorder;
     /** Build a cell buffer and paint it through `options.canvas`, or a new canvas. */
     constructor(options?: TerminalOptions);
     /**
@@ -177,6 +239,41 @@ export declare class Terminal implements TerminalContract, Drawable {
      * The foreground index replaces a direct-color foreground.
      */
     color(fg: number | null, bg?: number | null): void;
+    /**
+     * Select the palette used for indexes 0–15.
+     * `ansi` is the classic set (7 is gray). `c64` is VIC-II order (7 is yellow, 6 is blue).
+     * Indexes 16–255 stay the 256-color cube. An unknown name is ignored.
+     * The pen, stored cells, paper, and border index are retinted. `ESC c` does not change this.
+     */
+    colorStyle(style: ColorStyle): void;
+    /**
+     * Fill the grid behind cells that have no background of their own.
+     * A number is a palette index. Null, or a blank string, leaves those cells transparent
+     * so the layers behind the terminal stay visible. This is not the pen background:
+     * `color`, erase, and `clear` do not change it.
+     */
+    background(color: string | number | null): void;
+    /**
+     * Draw a solid border around the canvas. A number is a palette index.
+     * Null clears the border this method set. The width is CSS pixels and defaults
+     * to 2 when a color is set and the current width is 0. A later call that omits
+     * the width keeps it. A border set on the element by the game is left alone
+     * until this method is used.
+     */
+    border(color: string | number | null, width?: number): void;
+    /** Caret shape. `underline` is the bottom bar, `bar` is a vertical beam, `block` fills the cell. */
+    setCursorStyle(style: CursorStyle): void;
+    /**
+     * Blink the caret. `ms` is the time it stays lit and the time it stays dark.
+     * 0, or anything that is not a positive number, leaves it steady.
+     * `cursorLit === false` hides it either way.
+     */
+    cursorSpeed(ms: number): void;
+    /**
+     * Blink cells marked with SGR 5. `ms` is one half cycle.
+     * SGR 6 uses half of that. 0 keeps every blinking glyph drawn, which is the default.
+     */
+    blinkSpeed(ms: number): void;
     /** Hold redraws until the matching `endFrame`. Calls may nest. */
     beginFrame(): void;
     /** Release one `beginFrame`. The last one redraws if anything changed. */
@@ -272,6 +369,18 @@ export declare class Terminal implements TerminalContract, Drawable {
     private resetTerminal;
     private scrollIntoView;
     private ink;
+    private applyOptions;
+    private activeStyle;
+    private setSpeed;
+    private armTimer;
+    private phaseOn;
+    private blinkHidden;
+    private paintCursor;
+    /**
+     * Write the canvas border only when it differs from the last value this
+     * terminal set. A game that styled the element itself is not cleared.
+     */
+    private syncBorder;
     private fillBlank;
     private inRange;
     private flush;

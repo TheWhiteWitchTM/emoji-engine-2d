@@ -19,8 +19,8 @@ Designed for the kind of games that lived between the late 1970s and the early 2
 
 - Canvas with named layers, a camera, and `drawEmoji`
 - Sprites you place on any layer, move with `vx` / `vy`, and collide as circles
-- Terminal cell buffer (ECMA-48 / ANSI X3.64 sequences, the 16- and 256-color palettes, direct color, VT100 line drawing, batched redraw) that paints through a Canvas, ignores the camera, and exposes that canvas
-- Optional Utilities chrome: title, middle slot, fullscreen button, plain footer div
+- Terminal cell buffer (ECMA-48 / ANSI X3.64 sequences, the 16- and 256-color palettes, a C64 color style, direct color, screen background, border, cursor style and blink speed, VT100 line drawing, batched redraw) that paints through a Canvas, ignores the camera, and exposes that canvas
+- Optional Utilities chrome: title, middle slot, fullscreen button that knows when the page is already fullscreen, plain footer div
 - `isKeyDown`, `onKey`, and a short `beep`
 - Plain JavaScript in `dist/` for an `import`, and script-tag builds in `browser/`
 

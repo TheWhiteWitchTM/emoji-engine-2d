@@ -4,7 +4,21 @@ emoji-engine-2d is alpha, at package version 0.1.0. Entries here describe behavi
 
 ## Unreleased
 
-The terminal cell buffer now follows ECMA-48 (ANSI X3.64 / ISO/IEC 6429). [README.md](README.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [INTERFACES.md](INTERFACES.md) describe that contract. `examples/demo.js` checks the sequences below.
+### Screen, cursor, and fullscreen
+
+The default palette is still the classic ANSI set, so existing `color` indexes do not move. Index 7 stays gray (`#aaaaaa`) and index 3 stays brown (`#aa5500`).
+
+- `colorStyle('c64')` switches indexes 0–15 to VIC-II order. Index 6 is blue (`#0000aa`), 7 is yellow (`#eeee77`), 14 is light blue (`#0088ff`), and white is 1. Indexes 16–255 stay the 256-color cube. On `c64`, the bright flag does not shift 0–7 into 8–15. `ESC c` does not change the palette. An unknown name is ignored.
+- A cell with no foreground index paints palette entry 15. That is `#ffffff` on `ansi`. It used to paint `#eeeeee`.
+- `background(color)` paints the paper behind cells that have no background of their own. A number is a palette index, a string is CSS, and null leaves those cells transparent. `color`, erase, scroll, and `clear` still do not paint the pen background into empty cells. `ESC c` does not clear the paper.
+- `border(color, width?)` sets a solid CSS border on the canvas. The width defaults to 2 pixels and is kept when a later call omits it. Null clears the border this method set. A border the game put on the element itself is left alone until `border` is used. A border index follows `colorStyle`.
+- The caret is drawn by default. `cursorLit === false` hides it, and `cursorColor` is its color (default `#9ee`). Both are read on the next draw, which is what a frame loop that assigns them already does. The caret is clamped onto the grid, so it stays visible when the column sits just past the last cell. `setCursorStyle` accepts `underline` (the bottom bar, the default), `bar`, and `block`.
+- `cursorSpeed(ms)` blinks the caret. `ms` is the lit time and the dark time. 0 keeps it steady. `cursorLit === false` hides it either way.
+- `blinkSpeed(ms)` blinks SGR 5. SGR 6 uses half of that. 0, the default, keeps those glyphs drawn.
+- The same values can be passed to `new Terminal(options)`: `colorStyle`, `background`, `border`, `borderWidth`, `showCursor`, `cursorColor`, `cursorStyle`, `cursorSpeed`, `blinkSpeed`.
+- The fullscreen button reads `F11 Fullscreen` until the document is fullscreen, then `Esc Exit`. It checks at creation, so a page that is already fullscreen does not start on the F11 label, and it follows `fullscreenchange` when some other element is the fullscreen one. The button still does not listen for the F11 key.
+
+The terminal cell buffer follows ECMA-48 (ANSI X3.64 / ISO/IEC 6429). [README.md](README.md), [ARCHITECTURE.md](ARCHITECTURE.md), and [INTERFACES.md](INTERFACES.md) describe that contract. `examples/demo.js` checks the sequences below.
 
 ### Terminal
 
@@ -26,4 +40,4 @@ The terminal cell buffer now follows ECMA-48 (ANSI X3.64 / ISO/IEC 6429). [READM
 
 ### Unchanged
 
-Canvas, Engine, and Utilities are unchanged in this pass. The terminal still paints in screen space, ignores the camera, and redraws through its canvas. `beginFrame` and `endFrame` still batch those redraws.
+Canvas and Engine are unchanged in this pass. The terminal still paints in screen space, ignores the camera, and redraws through its canvas. `beginFrame` and `endFrame` still batch those redraws. `color(fg, bg)` still means the pen, and an omitted background is still left alone.

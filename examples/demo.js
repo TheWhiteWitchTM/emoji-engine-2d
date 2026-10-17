@@ -34,6 +34,7 @@ term.write('A hunter crosses the heath.');
 checkChrome();
 checkTerminal();
 checkAnsi();
+checkGlass();
 checkCollision();
 
 const witch = engine.sprite('🧙‍♀️', 360, 180, 48);
@@ -109,7 +110,17 @@ function checkChrome() {
   ui.setTitle('Night Hunt');
   if (textOf(parts[0]) !== 'Night Hunt') fail('setTitle');
   ui.setTitle('Witch Hunt');
-  if ('click' in parts[2] && typeof parts[2].click === 'function') parts[2].click();
+  const button = parts[2];
+  expect(textOf(button), 'F11 Fullscreen', 'fullscreen label');
+  if (typeof button.click === 'function') button.click();
+  expect(textOf(button), 'Esc Exit', 'label while fullscreen');
+  const extra = document.createElement('canvas');
+  const again = Utilities.wrap(extra, { title: 'Already' });
+  const againButton = again.headerMiddle?.parentElement?.children?.[2];
+  expect(textOf(againButton), 'Esc Exit', 'wrap opened during fullscreen');
+  if (typeof button.click === 'function') button.click();
+  expect(textOf(button), 'F11 Fullscreen', 'label after leaving fullscreen');
+  expect(textOf(againButton), 'F11 Fullscreen', 'other wrap heard the exit');
 }
 
 function checkTerminal() {
@@ -467,6 +478,164 @@ function checkAnsi() {
   expect(String(api.bg), '5', 'color keeps bg');
   api.write('Y');
   expect(`${api.get(1, 0).fg},${api.get(1, 0).bg}`, '1,5', 'later color');
+}
+
+function checkGlass() {
+  const ash = new Terminal({ cols: 2, rows: 1, cellWidth: 8, cellHeight: 16 });
+  ash.color(7);
+  ash.write('G');
+  expect(paintText(ash), '#aaaaaa', 'ansi 7 stays gray');
+  ash.colorStyle('nope');
+  expect(ash.palette, 'ansi', 'unknown palette is ignored');
+  ash.colorStyle('c64');
+  expect(ash.palette, 'c64', 'c64 palette');
+  expect(paintText(ash), '#eeee77', 'stored index 7 becomes yellow');
+  ash.colorStyle('ansi');
+  expect(paintText(ash), '#aaaaaa', 'palette returns to ansi gray');
+
+  const vic = new Terminal({
+    cols: 4,
+    rows: 2,
+    cellWidth: 8,
+    cellHeight: 10,
+    colorStyle: 'c64',
+    background: 6,
+    border: 14,
+  });
+  expect(vic.canvas.element.style.border, '2px solid #0088ff', 'c64 border');
+  expect(paintFill(vic, 32, 20), '#0000aa', 'c64 paper');
+  vic.color(14, 6);
+  vic.write('B');
+  expect(paintText(vic), '#0088ff', 'c64 light blue ink');
+  expect(paintFill(vic, 8, 10), '#0000aa', 'c64 cell blue');
+  vic.clear();
+  vic.bright = true;
+  vic.color(7, null);
+  vic.write('Y');
+  expect(paintText(vic), '#eeee77', 'c64 bright does not shift yellow');
+  vic.background(0);
+  expect(paintFill(vic, 32, 20), '#000000', 'paper changes to black');
+  vic.colorStyle('ansi');
+  vic.background(6);
+  expect(paintFill(vic, 32, 20), '#00aaaa', 'paper index follows the palette');
+  vic.background(null);
+  if (paintFill(vic, 32, 20)) fail('cleared paper still paints');
+  vic.background(999);
+  if (paintFill(vic, 32, 20)) fail('rejected paper index painted');
+  vic.write('\x1bc');
+  expect(vic.palette, 'ansi', 'reset keeps the palette');
+  expect(String(vic.fg), '15', 'reset restores the pen');
+  vic.colorStyle('c64');
+  vic.background(6);
+  vic.write('\x1bc');
+  expect(vic.palette, 'c64', 'reset keeps c64');
+  expect(paintFill(vic, 32, 20), '#0000aa', 'reset keeps the paper');
+
+  const bare = new Terminal({ cols: 1, rows: 1, cellWidth: 8, cellHeight: 10 });
+  bare.set(0, 0, { ch: 'Q' });
+  expect(paintText(bare), '#ffffff', 'missing fg uses ansi white');
+  bare.colorStyle('c64');
+  expect(paintText(bare), '#bbbbbb', 'missing fg uses c64 color 15');
+
+  const owned = new Terminal({ cols: 2, rows: 1, cellWidth: 8, cellHeight: 10 });
+  owned.canvas.element.style.border = '2px solid #39ff14';
+  owned.write('Hi');
+  expect(owned.canvas.element.style.border, '2px solid #39ff14', 'preset border stays');
+  owned.border('#ff00ff', 4);
+  expect(owned.canvas.element.style.border, '4px solid #ff00ff', 'border color');
+  owned.border(6);
+  expect(owned.canvas.element.style.border, '4px solid #00aaaa', 'border keeps its width');
+  owned.colorStyle('c64');
+  expect(owned.canvas.element.style.border, '4px solid #0000aa', 'border index follows c64');
+  owned.colorStyle('ansi');
+  expect(owned.canvas.element.style.border, '4px solid #00aaaa', 'border index follows ansi');
+  owned.border(null);
+  expect(owned.canvas.element.style.border, '', 'border clears');
+
+  const caret = new Terminal({ cols: 2, rows: 1, cellWidth: 10, cellHeight: 12 });
+  expect(String(caret.cursorLit), 'true', 'cursor starts lit');
+  const home = watch(caret).find((item) => item.kind === 'rect' && item.h === 2);
+  if (!home || home.x !== 0 || home.fill !== '#9ee') fail('cursor missing at home');
+  caret.write('Z');
+  caret.cursor.col = caret.cols;
+  caret.cursor.row = caret.rows;
+  const bar = watch(caret).find((item) => item.kind === 'rect' && item.h === 2);
+  if (!bar || bar.x !== 10 || bar.y !== 10 || bar.fill !== '#9ee') fail('cursor left the glass');
+  caret.cursorColor = '#e6d3b0';
+  caret.cursorLit = false;
+  if (watch(caret).some((item) => item.kind === 'rect')) fail('cursorLit false still drew');
+  caret.cursorLit = true;
+  caret.setCursorStyle('block');
+  const block = watch(caret).find((item) => item.kind === 'rect' && item.w === 10 && item.h === 12);
+  expect(block && block.fill, '#e6d3b0', 'block cursor color');
+  caret.setCursorStyle('bar');
+  const beam = watch(caret).find((item) => item.kind === 'rect' && item.w === 2 && item.h === 12);
+  expect(beam && beam.fill, '#e6d3b0', 'bar cursor');
+  const hidden = new Terminal({
+    cols: 1,
+    rows: 1,
+    cellWidth: 8,
+    cellHeight: 10,
+    showCursor: false,
+  });
+  hidden.write('Z');
+  if (watch(hidden).some((item) => item.kind === 'rect')) fail('showCursor false drew a caret');
+
+  const clock = new Terminal({ cols: 2, rows: 1, cellWidth: 8, cellHeight: 10 });
+  clock.write('A');
+  const realNow = Date.now;
+  let now = 10_000_000;
+  let failure = '';
+  Date.now = () => now;
+  try {
+    clock.cursorSpeed(100);
+    if (!watch(clock).some((item) => item.kind === 'rect' && item.h === 2)) failure = 'cursor starts the blink lit';
+    now += 100;
+    if (!failure && watch(clock).some((item) => item.kind === 'rect' && item.h === 2)) failure = 'cursor blink did not go dark';
+    now += 100;
+    if (!failure && !watch(clock).some((item) => item.kind === 'rect' && item.h === 2)) failure = 'cursor blink did not return';
+    clock.cursorLit = false;
+    if (!failure && watch(clock).some((item) => item.kind === 'rect' && item.h === 2)) failure = 'cursorLit lost to the blink';
+    clock.cursorLit = true;
+    clock.cursorSpeed(0);
+    now += 100;
+    if (!failure && !watch(clock).some((item) => item.kind === 'rect' && item.h === 2)) failure = 'steady cursor went dark';
+
+    clock.clear();
+    clock.write('\x1b[0;5mZ');
+    now = 20_000_000;
+    clock.blinkSpeed(80);
+    if (!failure && !watch(clock).some((item) => item.kind === 'text' && item.text === 'Z')) failure = 'slow blink started hidden';
+    now += 80;
+    if (!failure && watch(clock).some((item) => item.kind === 'text' && item.text === 'Z')) failure = 'slow blink stayed drawn';
+    now += 80;
+    if (!failure && !watch(clock).some((item) => item.kind === 'text' && item.text === 'Z')) failure = 'slow blink did not return';
+    clock.clear();
+    clock.write('\x1b[0;6mZ');
+    now = 30_000_000;
+    clock.blinkSpeed(80);
+    if (!failure && !watch(clock).some((item) => item.kind === 'text' && item.text === 'Z')) failure = 'rapid blink started hidden';
+    now += 40;
+    if (!failure && watch(clock).some((item) => item.kind === 'text' && item.text === 'Z')) failure = 'rapid blink was not half speed';
+    clock.blinkSpeed(0);
+    now += 1000;
+    if (!failure && !watch(clock).some((item) => item.kind === 'text' && item.text === 'Z')) failure = 'blinkSpeed 0 hid the glyph';
+  } finally {
+    Date.now = realNow;
+    clock.cursorSpeed(0);
+    clock.blinkSpeed(0);
+  }
+  if (failure) fail(failure);
+}
+
+function paintText(terminal) {
+  const mark = watch(terminal).find((item) => item.kind === 'text');
+  return mark ? mark.fill : 'missing';
+}
+
+function paintFill(terminal, w, h) {
+  const mark = watch(terminal).find((item) => item.kind === 'rect' && item.w === w && item.h === h);
+  return mark ? mark.fill : '';
 }
 
 function checkCamera(witch) {

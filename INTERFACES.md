@@ -57,13 +57,25 @@ interface CanvasOptions {
   height?: number; // default 600
 }
 
+type ColorStyle = 'ansi' | 'c64';
+type CursorStyle = 'underline' | 'block' | 'bar';
+
 interface TerminalOptions {
-  cols?: number;       // default 40
-  rows?: number;       // default 12
-  canvas?: Canvas;     // created from the grid size when omitted
-  cellWidth?: number;  // default 16
-  cellHeight?: number; // default 20
-  layer?: string;      // default "terminal"
+  cols?: number;         // default 40
+  rows?: number;         // default 12
+  canvas?: Canvas;       // created from the grid size when omitted
+  cellWidth?: number;    // default 16
+  cellHeight?: number;   // default 20
+  layer?: string;        // default "terminal"
+  colorStyle?: ColorStyle;             // default "ansi"
+  background?: string | number | null; // paper; number is a palette index; default null
+  border?: string | number | null;     // canvas border; number is a palette index; default null
+  borderWidth?: number;                // CSS pixels; default 2 once a border color is set
+  showCursor?: boolean;                // default true
+  cursorColor?: string;                // default "#9ee"
+  cursorStyle?: CursorStyle;           // default "underline"
+  cursorSpeed?: number;                // blink half-cycle in ms; 0 is steady; default 0
+  blinkSpeed?: number;                 // SGR 5 half-cycle in ms; 0 draws the glyph; default 0
 }
 
 interface EngineOptions {
@@ -157,6 +169,20 @@ interface Terminal extends Drawable {
   bg: number | null;
   /** Stored on cells written from now on. Default false. */
   bright: boolean;
+  /** Palette for indexes 0–15. Default "ansi". Assigning it retints on the next draw. */
+  palette: 'ansi' | 'c64';
+  /** Paper behind uncolored cells. A number is a palette index. Default null. */
+  screenColor: string | number | null;
+  /** Border color. A number is a palette index. Default null. */
+  borderColor: string | number | null;
+  /** Border thickness in CSS pixels. Default 0. */
+  borderWidth: number;
+  /** False hides the caret. Default true. Read on the next draw. */
+  cursorLit: boolean;
+  /** Caret color. Default "#9ee". Read on the next draw. */
+  cursorColor: string;
+  /** Caret shape. Default "underline". Read on the next draw. */
+  cursorStyle: 'underline' | 'block' | 'bar';
 
   /**
    * Write text at the cursor.
@@ -185,6 +211,45 @@ interface Terminal extends Drawable {
    */
   color(fg: number | null, bg?: number | null): void;
 
+  /**
+   * Palette for indexes 0–15.
+   * "ansi" keeps the classic colors. "c64" is VIC-II order.
+   * Indexes 16–255 are unchanged. An unknown name is ignored.
+   * ESC c does not change this.
+   */
+  colorStyle(style: 'ansi' | 'c64'): void;
+
+  /**
+   * Paper behind cells with no background of their own.
+   * A number is a palette index. A string is CSS. null is transparent.
+   * An out-of-range index is ignored. This is not the pen.
+   */
+  background(color: string | number | null): void;
+
+  /**
+   * Solid CSS border on the canvas.
+   * A number is a palette index. null clears the border this method set.
+   * width is CSS pixels and defaults to 2 when a color is set and the width is 0.
+   * A later call that omits width keeps it. A border the page set on the element
+   * is left alone until this method is used. A border index follows colorStyle.
+   */
+  border(color: string | number | null, width?: number): void;
+
+  /** "underline" is the bottom bar, "bar" is a vertical beam, "block" fills the cell. */
+  setCursorStyle(style: 'underline' | 'block' | 'bar'): void;
+
+  /**
+   * Blink the caret. ms is the lit time and the dark time.
+   * 0 keeps it steady. cursorLit false hides it either way.
+   */
+  cursorSpeed(ms: number): void;
+
+  /**
+   * Blink SGR 5. ms is one half cycle. SGR 6 uses half of that.
+   * 0, the default, keeps the glyph drawn.
+   */
+  blinkSpeed(ms: number): void;
+
   /** Hold redraws. Calls may nest. */
   beginFrame(): void;
 
@@ -208,7 +273,35 @@ interface Terminal extends Drawable {
 }
 ```
 
-Indexes 0–15 use the classic palette (`#aa5500` is color 3). `bright` draws foreground indexes 0–7 as 8–15 and does not change the font. Indexes 16–231 are the 6×6×6 cube (`0` is 0, otherwise `55 + step * 40`) and 232–255 are gray `8 + 10 * (index - 232)`. `fgRgb` and `bgRgb` override the index. A null background does not fill the cell, including after erase, scroll, and `clear`.
+Indexes 0–15 use the active palette. `ansi`, the default:
+
+| n | Color | n | Color |
+| --- | --- | --- | --- |
+| 0 | `#000000` | 8 | `#555555` |
+| 1 | `#aa0000` | 9 | `#ff5555` |
+| 2 | `#00aa00` | 10 | `#55ff55` |
+| 3 | `#aa5500` | 11 | `#ffff55` |
+| 4 | `#0000aa` | 12 | `#5555ff` |
+| 5 | `#aa00aa` | 13 | `#ff55ff` |
+| 6 | `#00aaaa` | 14 | `#55ffff` |
+| 7 | `#aaaaaa` | 15 | `#ffffff` |
+
+`c64` is VIC-II order. White is 1. Index 15 is light gray, not white.
+
+| n | Color | n | Color |
+| --- | --- | --- | --- |
+| 0 | `#000000` black | 8 | `#dd8855` orange |
+| 1 | `#ffffff` white | 9 | `#664400` brown |
+| 2 | `#880000` red | 10 | `#ff7777` light red |
+| 3 | `#aaffee` cyan | 11 | `#333333` dark gray |
+| 4 | `#cc44cc` purple | 12 | `#777777` gray |
+| 5 | `#00cc55` green | 13 | `#aaff66` light green |
+| 6 | `#0000aa` blue | 14 | `#0088ff` light blue |
+| 7 | `#eeee77` yellow | 15 | `#bbbbbb` light gray |
+
+On `ansi`, `bright` draws foreground indexes 0–7 as 8–15 and does not change the font. On `c64` it does not shift the index. Indexes 16–231 are the 6×6×6 cube (`0` is 0, otherwise `55 + step * 40`) and 232–255 are gray `8 + 10 * (index - 232)`, on both palettes. `fgRgb` and `bgRgb` override the index. A null cell background does not fill the cell, including after erase, scroll, and `clear`. `screenColor`, when set, shows through those cells. A missing foreground index paints palette entry 15.
+
+The caret is a 2px underline in `cursorColor`, clamped into the grid. `block` fills the cell. `bar` is a 2px vertical beam. `cursorLit === false` draws nothing. `cursorSpeed(0)` and `blinkSpeed(0)` are steady. `ESC c` resets the pen and the cells and keeps the palette, the paper, the border, and the caret settings.
 
 `write` and `put` parse ECMA-48. The sequences that change the buffer:
 
@@ -320,7 +413,7 @@ The returned column is `header` (optional), then the target element, then the fo
 
 `setTitle(title)` replaces the left-hand title. It does nothing when the header was not built.
 
-The fullscreen button calls `requestFullscreen` on the column, or `exitFullscreen` when the document is already fullscreen. A rejected request is ignored.
+The fullscreen button calls `requestFullscreen` on the column, or `exitFullscreen` when the document is already fullscreen. A rejected request is ignored. The label is `F11 Fullscreen`, or `Esc Exit` while `document.fullscreenElement` is set. `wrap` reads that state immediately, and `fullscreenchange` updates every button, including when the fullscreen element is a parent of the wrap. The button does not listen for the F11 key.
 
 Class names on the chrome, for styling: `ee-wrap`, `ee-header`, `ee-title`, `ee-middle`, `ee-fullscreen`, `ee-footer`.
 

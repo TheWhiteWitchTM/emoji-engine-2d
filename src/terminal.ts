@@ -2,8 +2,8 @@ import { Canvas, type Drawable, type Point } from './canvas.js';
 
 /**
  * One cell in the terminal buffer.
- * Indexes 0–15 are the classic palette. Indexes 16–255 are the indexed
- * color cube. A direct color, when set, is what gets painted.
+ * Indexes 0–15 use the active palette (`ansi` by default, or `c64`).
+ * Indexes 16–255 are the indexed color cube. A direct color, when set, is what gets painted.
  */
 export interface Cell {
   ch: string;
@@ -34,6 +34,12 @@ export interface Cell {
   font?: number;
 }
 
+/** Indexes 0–15. `ansi` is the classic palette. `c64` is the VIC-II order. */
+export type ColorStyle = 'ansi' | 'c64';
+
+/** How the caret is drawn. `underline` is the bottom bar. */
+export type CursorStyle = 'underline' | 'block' | 'bar';
+
 /** Options for a cell-buffer terminal. */
 export interface TerminalOptions {
   /** Columns in the buffer. Default 40. */
@@ -48,6 +54,30 @@ export interface TerminalOptions {
   cellHeight?: number;
   /** Canvas layer name. Default `terminal`. */
   layer?: string;
+  /** Palette for indexes 0–15. Default `ansi`. */
+  colorStyle?: ColorStyle;
+  /**
+   * Paper behind cells that have no background of their own.
+   * A number is a palette index. Default null, which stays transparent.
+   */
+  background?: string | number | null;
+  /** Border color around the canvas. A number is a palette index. Default null. */
+  border?: string | number | null;
+  /** Border thickness in CSS pixels. Default 2 once a border color is set. */
+  borderWidth?: number;
+  /** Draw the caret. Default true. */
+  showCursor?: boolean;
+  /** Caret color. Default `#9ee`. */
+  cursorColor?: string;
+  /** Caret shape. Default `underline`. */
+  cursorStyle?: CursorStyle;
+  /** Milliseconds between caret blinks. 0 stays lit. Default 0. */
+  cursorSpeed?: number;
+  /**
+   * Milliseconds for one slow-blink half cycle (SGR 5).
+   * Rapid blink (SGR 6) uses half of that. 0 keeps the glyph drawn. Default 0.
+   */
+  blinkSpeed?: number;
 }
 
 /** Key handler. `key` is `KeyboardEvent.key`. */
@@ -67,6 +97,12 @@ interface TerminalContract {
   get(col: number, row: number): Cell;
   clear(): void;
   color(fg: number | null, bg?: number | null): void;
+  colorStyle(style: ColorStyle): void;
+  background(color: string | number | null): void;
+  border(color: string | number | null, width?: number): void;
+  setCursorStyle(style: CursorStyle): void;
+  cursorSpeed(ms: number): void;
+  blinkSpeed(ms: number): void;
   beginFrame(): void;
   endFrame(): void;
   onKey(handler: KeyHandler): void;
@@ -116,11 +152,23 @@ interface CursorMark {
   gset: Record<GSlot, GlyphSet>;
 }
 
-const CLASSIC = [
+/** Classic ANSI colors. Index 3 is brown. Index 7 is gray, not white. */
+const ANSI = [
   '#000000', '#aa0000', '#00aa00', '#aa5500',
   '#0000aa', '#aa00aa', '#00aaaa', '#aaaaaa',
   '#555555', '#ff5555', '#55ff55', '#ffff55',
   '#5555ff', '#ff55ff', '#55ffff', '#ffffff',
+];
+
+/**
+ * VIC-II colors in register order, the bright set people mean by a C64 screen.
+ * Index 6 is blue and index 7 is yellow. White is 1, not 15.
+ */
+const C64 = [
+  '#000000', '#ffffff', '#880000', '#aaffee',
+  '#cc44cc', '#00cc55', '#0000aa', '#eeee77',
+  '#dd8855', '#664400', '#ff7777', '#333333',
+  '#777777', '#aaff66', '#0088ff', '#bbbbbb',
 ];
 
 /**
@@ -178,8 +226,28 @@ export class Terminal implements TerminalContract, Drawable {
   fg: number | null = 15;
   /** Background color index used by `write` and `put`. Null stays transparent. */
   bg: number | null = null;
-  /** Intensity flag stored on cells written from now on. Indexes 0–7 draw as 8–15. */
+  /** Intensity flag stored on cells written from now on. Indexes 0–7 draw as 8–15 on `ansi`. */
   bright = false;
+  /**
+   * Palette for indexes 0–15. `ansi` keeps the classic colors, including gray at 7.
+   * Assigning this retints on the next draw. `colorStyle` also redraws and updates a border index.
+   */
+  palette: ColorStyle = 'ansi';
+  /**
+   * Paper behind cells with no background. A number is a palette index.
+   * Null leaves those cells transparent. `background` applies it and redraws.
+   */
+  screenColor: string | number | null = null;
+  /** Border color around the canvas. A number is a palette index. Null draws no border. */
+  borderColor: string | number | null = null;
+  /** Border thickness in CSS pixels. */
+  borderWidth = 0;
+  /** When false, the caret is not drawn. Games toggle this. Default true. */
+  cursorLit = true;
+  /** Caret color. Default `#9ee`. Games assign this. */
+  cursorColor = '#9ee';
+  /** Caret shape. `underline` is the bottom bar and the default. */
+  cursorStyle: CursorStyle = 'underline';
 
   private readonly cellWidth: number;
   private readonly cellHeight: number;
@@ -235,6 +303,14 @@ export class Terminal implements TerminalContract, Drawable {
   private numberCommitted = false;
   private fillingSub = false;
   private stringKind: StringKind = 'osc';
+  private cursorMs = 0;
+  private blinkMs = 0;
+  private cursorEpoch = 0;
+  private blinkEpoch = 0;
+  private cursorTimer: ReturnType<typeof setInterval> | null = null;
+  private blinkTimer: ReturnType<typeof setInterval> | null = null;
+  /** Last border written by this terminal, so a game's own CSS border is left alone. */
+  private lastBorder = '';
 
   /** Build a cell buffer and paint it through `options.canvas`, or a new canvas. */
   constructor(options: TerminalOptions = {}) {
@@ -252,6 +328,7 @@ export class Terminal implements TerminalContract, Drawable {
     this.saved = this.capture();
     this.canvas.add(this, options.layer ?? 'terminal');
     this.armKeys();
+    this.applyOptions(options);
     this.flush();
   }
 
@@ -313,6 +390,78 @@ export class Terminal implements TerminalContract, Drawable {
     this.bgRgb = null;
   }
 
+  /**
+   * Select the palette used for indexes 0–15.
+   * `ansi` is the classic set (7 is gray). `c64` is VIC-II order (7 is yellow, 6 is blue).
+   * Indexes 16–255 stay the 256-color cube. An unknown name is ignored.
+   * The pen, stored cells, paper, and border index are retinted. `ESC c` does not change this.
+   */
+  colorStyle(style: ColorStyle): void {
+    if (style !== 'ansi' && style !== 'c64') return;
+    if (style === this.palette) return;
+    this.palette = style;
+    this.syncBorder();
+    this.flush();
+  }
+
+  /**
+   * Fill the grid behind cells that have no background of their own.
+   * A number is a palette index. Null, or a blank string, leaves those cells transparent
+   * so the layers behind the terminal stay visible. This is not the pen background:
+   * `color`, erase, and `clear` do not change it.
+   */
+  background(color: string | number | null): void {
+    const next = normalizeColor(this.activeStyle(), color);
+    if (typeof color === 'number' && next == null) return;
+    this.screenColor = next;
+    this.flush();
+  }
+
+  /**
+   * Draw a solid border around the canvas. A number is a palette index.
+   * Null clears the border this method set. The width is CSS pixels and defaults
+   * to 2 when a color is set and the current width is 0. A later call that omits
+   * the width keeps it. A border set on the element by the game is left alone
+   * until this method is used.
+   */
+  border(color: string | number | null, width?: number): void {
+    const next = normalizeColor(this.activeStyle(), color);
+    if (typeof color === 'number' && next == null) return;
+    this.borderColor = next;
+    if (width !== undefined && Number.isFinite(width)) {
+      this.borderWidth = Math.max(0, Math.floor(width));
+    } else if (next == null) {
+      this.borderWidth = 0;
+    } else if (this.borderWidth <= 0) {
+      this.borderWidth = 2;
+    }
+    this.syncBorder();
+  }
+
+  /** Caret shape. `underline` is the bottom bar, `bar` is a vertical beam, `block` fills the cell. */
+  setCursorStyle(style: CursorStyle): void {
+    if (style !== 'underline' && style !== 'block' && style !== 'bar') return;
+    this.cursorStyle = style;
+    this.flush();
+  }
+
+  /**
+   * Blink the caret. `ms` is the time it stays lit and the time it stays dark.
+   * 0, or anything that is not a positive number, leaves it steady.
+   * `cursorLit === false` hides it either way.
+   */
+  cursorSpeed(ms: number): void {
+    this.setSpeed('cursor', ms);
+  }
+
+  /**
+   * Blink cells marked with SGR 5. `ms` is one half cycle.
+   * SGR 6 uses half of that. 0 keeps every blinking glyph drawn, which is the default.
+   */
+  blinkSpeed(ms: number): void {
+    this.setSpeed('blink', ms);
+  }
+
   /** Hold redraws until the matching `endFrame`. Calls may nest. */
   beginFrame(): void {
     this.batch += 1;
@@ -349,18 +498,22 @@ export class Terminal implements TerminalContract, Drawable {
   draw(ctx: CanvasRenderingContext2D, _camera: Point): void {
     const { cellWidth: width, cellHeight: height } = this;
     const size = Math.floor(height * 0.8);
+    const style = this.activeStyle();
     ctx.save();
+    ctx.globalAlpha = 1;
+    const paper = resolveColor(style, this.screenColor);
+    if (paper && this.cols > 0 && this.rows > 0) {
+      ctx.fillStyle = paper;
+      ctx.fillRect(0, 0, this.cols * width, this.rows * height);
+    }
     for (let row = 0; row < this.rows; row += 1) {
       for (let col = 0; col < this.cols; col += 1) {
-        this.paintCell(ctx, this.cells[row][col], col * width, row * height, width, height, size);
+        this.paintCell(ctx, this.cells[row][col], col * width, row * height, width, height, size, style);
       }
     }
-    ctx.globalAlpha = 1;
-    const barX = this.cursor.col * width;
-    const barY = (this.cursor.row + 1) * height - 2;
-    ctx.fillStyle = '#9ee';
-    ctx.fillRect(barX, barY, width, 2);
+    this.paintCursor(ctx, width, height);
     ctx.restore();
+    this.syncBorder();
   }
 
   private paintCell(
@@ -371,9 +524,10 @@ export class Terminal implements TerminalContract, Drawable {
     width: number,
     height: number,
     size: number,
+    style: ColorStyle,
   ): void {
-    let fg = cssColor(cell, 'fg') ?? '#eeeeee';
-    let bg = cssColor(cell, 'bg');
+    let fg = cssColor(cell, 'fg', style) ?? paletteColor(style, 15) ?? '#ffffff';
+    let bg = cssColor(cell, 'bg', style);
     if (cell.reverse) {
       const ink = bg ?? '#000000';
       bg = fg;
@@ -384,7 +538,7 @@ export class Terminal implements TerminalContract, Drawable {
       ctx.fillStyle = bg;
       ctx.fillRect(x, y, width, height);
     }
-    const hidden = cell.conceal === true;
+    const hidden = cell.conceal === true || this.blinkHidden(cell);
     const glyph = !hidden && !!cell.ch && cell.ch !== ' ';
     const underline = hidden ? 0 : (cell.underline ?? 0);
     const strike = !hidden && cell.strike === true;
@@ -1517,6 +1671,103 @@ export class Terminal implements TerminalContract, Drawable {
     return cell;
   }
 
+  private applyOptions(options: TerminalOptions): void {
+    if (options.colorStyle === 'c64') this.palette = 'c64';
+    if (options.background !== undefined) {
+      const next = normalizeColor(this.activeStyle(), options.background);
+      if (!(typeof options.background === 'number' && next == null)) this.screenColor = next;
+    }
+    if (options.showCursor === false) this.cursorLit = false;
+    if (typeof options.cursorColor === 'string' && options.cursorColor) this.cursorColor = options.cursorColor;
+    if (isCursorStyle(options.cursorStyle)) this.cursorStyle = options.cursorStyle;
+    if (options.border !== undefined) this.border(options.border, options.borderWidth);
+    if (options.cursorSpeed != null) this.setSpeed('cursor', options.cursorSpeed);
+    if (options.blinkSpeed != null) this.setSpeed('blink', options.blinkSpeed);
+  }
+
+  private activeStyle(): ColorStyle {
+    return this.palette === 'c64' ? 'c64' : 'ansi';
+  }
+
+  private setSpeed(kind: 'cursor' | 'blink', ms: number): void {
+    const next = sanitizeMs(ms);
+    if (kind === 'cursor') {
+      this.cursorMs = next;
+      this.cursorEpoch = Date.now();
+    } else {
+      this.blinkMs = next;
+      this.blinkEpoch = Date.now();
+    }
+    this.armTimer(kind);
+    this.flush();
+  }
+
+  private armTimer(kind: 'cursor' | 'blink'): void {
+    const previous = kind === 'cursor' ? this.cursorTimer : this.blinkTimer;
+    if (previous != null) clearInterval(previous);
+    const ms = kind === 'cursor' ? this.cursorMs : this.blinkMs;
+    if (ms <= 0) {
+      if (kind === 'cursor') this.cursorTimer = null;
+      else this.blinkTimer = null;
+      return;
+    }
+    const timer = setInterval(() => {
+      if (this.batch > 0) return;
+      this.flush();
+    }, ms);
+    const handle = timer as unknown as { unref?: () => void };
+    handle.unref?.();
+    if (kind === 'cursor') this.cursorTimer = timer;
+    else this.blinkTimer = timer;
+  }
+
+  private phaseOn(epoch: number, ms: number): boolean {
+    if (ms <= 0) return true;
+    return Math.floor((Date.now() - epoch) / ms) % 2 === 0;
+  }
+
+  private blinkHidden(cell: Cell): boolean {
+    if (!cell.blink || this.blinkMs <= 0) return false;
+    const step = cell.blink === 2 ? Math.max(1, Math.floor(this.blinkMs / 2)) : this.blinkMs;
+    return Math.floor((Date.now() - this.blinkEpoch) / step) % 2 === 1;
+  }
+
+  private paintCursor(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    if (this.cursorLit === false || this.cols < 1 || this.rows < 1) return;
+    if (!this.phaseOn(this.cursorEpoch, this.cursorMs)) return;
+    const col = clamp(this.cursor.col, 0, this.cols - 1);
+    const row = clamp(this.cursor.row, 0, this.rows - 1);
+    const x = col * width;
+    const y = row * height;
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = this.cursorColor || '#9ee';
+    if (this.cursorStyle === 'block') {
+      ctx.fillRect(x, y, width, height);
+      return;
+    }
+    if (this.cursorStyle === 'bar') {
+      ctx.fillRect(x, y, Math.min(2, width), height);
+      return;
+    }
+    const bar = Math.min(2, height);
+    ctx.fillRect(x, y + height - bar, width, bar);
+  }
+
+  /**
+   * Write the canvas border only when it differs from the last value this
+   * terminal set. A game that styled the element itself is not cleared.
+   */
+  private syncBorder(): void {
+    let next = '';
+    if (this.borderColor != null && this.borderWidth > 0) {
+      const css = resolveColor(this.activeStyle(), this.borderColor);
+      if (css) next = `${this.borderWidth}px solid ${css}`;
+    }
+    if (next === this.lastBorder) return;
+    this.lastBorder = next;
+    this.canvas.element.style.border = next;
+  }
+
   private fillBlank(): void {
     this.cells.length = 0;
     for (let row = 0; row < this.rows; row += 1) this.cells.push(blankRow(this.cols));
@@ -1579,18 +1830,19 @@ function blanks(count: number): Cell[] {
   return Array.from({ length: count }, () => ({ ch: ' ' }));
 }
 
-function cssColor(cell: Cell, channel: 'fg' | 'bg'): string | null {
+function cssColor(cell: Cell, channel: 'fg' | 'bg', style: ColorStyle): string | null {
   const rgb = channel === 'fg' ? cell.fgRgb : cell.bgRgb;
   if (rgb) return `rgb(${rgb.r | 0}, ${rgb.g | 0}, ${rgb.b | 0})`;
   let index = channel === 'fg' ? cell.fg : cell.bg;
   if (index == null) return null;
-  if (channel === 'fg' && cell.bright && index >= 0 && index < 8) index += 8;
-  return palette(index);
+  // The C64 set has no bright half. Shifting 0–7 would turn yellow into orange.
+  if (style !== 'c64' && channel === 'fg' && cell.bright && index >= 0 && index < 8) index += 8;
+  return paletteColor(style, index);
 }
 
-function palette(index: number): string | null {
+function paletteColor(style: ColorStyle, index: number): string | null {
   if (!Number.isInteger(index) || index < 0 || index > 255) return null;
-  if (index < 16) return CLASSIC[index];
+  if (index < 16) return (style === 'c64' ? C64 : ANSI)[index];
   if (index < 232) {
     const cube = index - 16;
     const red = Math.floor(cube / 36);
@@ -1601,6 +1853,28 @@ function palette(index: number): string | null {
   }
   const gray = 8 + (index - 232) * 10;
   return `rgb(${gray}, ${gray}, ${gray})`;
+}
+
+function resolveColor(style: ColorStyle, color: string | number | null): string | null {
+  if (typeof color === 'number') return paletteColor(style, color);
+  if (typeof color === 'string' && color) return color;
+  return null;
+}
+
+function normalizeColor(style: ColorStyle, color: string | number | null): string | number | null {
+  if (color == null || color === '') return null;
+  if (typeof color === 'number') return paletteColor(style, color) == null ? null : color;
+  if (typeof color === 'string') return color;
+  return null;
+}
+
+function isCursorStyle(style: CursorStyle | undefined): style is CursorStyle {
+  return style === 'underline' || style === 'block' || style === 'bar';
+}
+
+function sanitizeMs(ms: number): number {
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.min(10_000, Math.floor(ms));
 }
 
 function faceFor(cell: Cell, size: number): string {

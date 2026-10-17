@@ -52,6 +52,11 @@ class FakeElement {
   }
 
   requestFullscreen() {
+    const doc = globalThis.document;
+    if (doc) {
+      doc.fullscreenElement = this;
+      if (typeof doc.dispatchEvent === 'function') doc.dispatchEvent({ type: 'fullscreenchange' });
+    }
     return Promise.resolve();
   }
 
@@ -105,14 +110,33 @@ class FakeDocument {
     this.body = new FakeElement('body');
     this.documentElement.appendChild(this.body);
     this.fullscreenElement = null;
+    this.listeners = new Map();
   }
 
   createElement(tag) {
     return new FakeElement(tag);
   }
 
+  addEventListener(type, handler) {
+    const list = this.listeners.get(type) ?? [];
+    list.push(handler);
+    this.listeners.set(type, list);
+  }
+
+  removeEventListener(type, handler) {
+    const list = this.listeners.get(type) ?? [];
+    this.listeners.set(type, list.filter((item) => item !== handler));
+  }
+
+  dispatchEvent(event) {
+    const list = this.listeners.get(event?.type) ?? [];
+    for (const handler of [...list]) handler(event);
+    return true;
+  }
+
   exitFullscreen() {
     this.fullscreenElement = null;
+    this.dispatchEvent({ type: 'fullscreenchange' });
     return Promise.resolve();
   }
 }

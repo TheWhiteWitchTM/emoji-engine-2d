@@ -41,7 +41,8 @@ interface UtilitiesContract {
 export const Utilities: UtilitiesContract = {
   /**
    * Wrap a target in a column. The header has a title, a middle slot, and a
-   * fullscreen button. The footer is a plain div. Either bar can be omitted.
+   * fullscreen button. The button label is "F11 Fullscreen", or "Esc Exit" while the
+   * document is already fullscreen. The footer is a plain div. Either bar can be omitted.
    */
   wrap(target: WrapTarget, options: WrapOptions = {}): WrapResult {
     const surface = resolveElement(target);
@@ -87,9 +88,7 @@ export const Utilities: UtilitiesContract = {
 
       const button = document.createElement('button');
       button.className = 'ee-fullscreen';
-      button.textContent = 'Fullscreen';
       button.setAttribute('type', 'button');
-      button.setAttribute('aria-label', 'Fullscreen');
       assign(button, {
         marginLeft: '8px',
         cursor: 'pointer',
@@ -99,7 +98,9 @@ export const Utilities: UtilitiesContract = {
         borderRadius: '4px',
         padding: '2px 8px',
       });
+      syncFullscreenButton(button);
       button.addEventListener('click', () => toggleFullscreen(wrap));
+      document.addEventListener('fullscreenchange', () => syncFullscreenButton(button));
 
       header.append(titleEl, headerMiddle, button);
       wrap.append(header);
@@ -162,9 +163,20 @@ function assign(element: HTMLElement, rules: Partial<CSSStyleDeclaration>): void
   Object.assign(element.style, rules);
 }
 
+function fullscreenLabel(active: boolean): string {
+  return active ? 'Esc Exit' : 'F11 Fullscreen';
+}
+
+/** The label follows the document, including a fullscreen element that is not this wrap. */
+function syncFullscreenButton(button: HTMLButtonElement): void {
+  const label = fullscreenLabel(Boolean(document.fullscreenElement));
+  button.textContent = label;
+  button.setAttribute('aria-label', label);
+}
+
 function toggleFullscreen(wrap: HTMLElement): void {
   const request = document.fullscreenElement
     ? document.exitFullscreen()
     : wrap.requestFullscreen();
-  void request.catch(() => {});
+  void Promise.resolve(request).catch(() => {});
 }
